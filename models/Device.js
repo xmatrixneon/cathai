@@ -63,6 +63,14 @@ const deviceSchema = new mongoose.Schema({
     isActive: {
       type: Boolean,
       default: false
+    },
+    callForwardingActive: {
+      type: Boolean,
+      default: false
+    },
+    callForwardingTo: {
+      type: String,
+      default: null
     }
   }],
   location: {

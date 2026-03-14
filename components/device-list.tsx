@@ -3,40 +3,22 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+  Card, CardContent, CardHeader, CardTitle,
 } from '@/components/ui/card'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { DeviceCard } from './device-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Smartphone,
-  Plus,
-  Search,
-  RefreshCw,
-  Wifi,
-  WifiOff,
-  AlertTriangle,
-  Download,
-  Radio
+  Smartphone, Plus, Search, RefreshCw, Wifi, WifiOff,
+  AlertTriangle, Download, Radio, PhoneForwarded, PhoneOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -57,13 +39,11 @@ interface Device {
     phoneNumber?: string
     carrier?: string
     isActive: boolean
+    callForwardingActive?: boolean
+    callForwardingTo?: string
   }>
   recentMessages: number
-  timeSinceLastSeen: {
-    minutes: number
-    hours: number
-    days: number
-  }
+  timeSinceLastSeen: { minutes: number; hours: number; days: number }
 }
 
 interface DeviceStats {
@@ -81,17 +61,29 @@ export function DeviceList() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState('lastSeen')
-  const [sortOrder, setSortOrder] = useState('desc')
+  const [sortOrder] = useState('desc')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [wsConnected, setWsConnected] = useState(false)
 
+  // FIX: forwardPhoneNumber is a separate controlled string so the Input is
+  // a proper controlled component and the value is always up to date when
+  // the confirm button fires.
+  const [forwardPhoneNumber, setForwardPhoneNumber] = useState('')
+  const [callForwardingDialog, setCallForwardingDialog] = useState<{
+    open: boolean
+    deviceId: string
+    simSlot: number
+    action: 'forward' | 'deactivate'
+  }>({ open: false, deviceId: '', simSlot: 0, action: 'forward' })
+
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<NodeJS.Timeout | null>(null)
 
-  // ─── REST API ─────────────────────────────────────────────────
+  // ─── REST API ──────────────────────────────────────────────────────────────
+
   const fetchDevices = useCallback(async () => {
     try {
       setLoading(true)
@@ -103,10 +95,8 @@ export function DeviceList() {
         ...(statusFilter !== 'all' && { status: statusFilter }),
         ...(searchTerm && { search: searchTerm }),
       })
-
       const response = await fetch(`/api/device/list?${params}`)
       const result = await response.json()
-
       if (result.success) {
         setDevices(result.data.devices)
         setStats(result.data.stats)
@@ -122,19 +112,18 @@ export function DeviceList() {
     }
   }, [page, statusFilter, sortBy, sortOrder, searchTerm])
 
-  // ─── WebSocket ───────────────────────────────────────────────
+  // ─── WebSocket ─────────────────────────────────────────────────────────────
+
   const connectWebSocket = useCallback(() => {
     if (typeof window === 'undefined') return
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${protocol}//${window.location.host}/gateway?client=dashboard`
-      const ws = new WebSocket(wsUrl)
+      const ws = new WebSocket(`${protocol}//${window.location.host}/gateway?client=dashboard`)
       wsRef.current = ws
 
       ws.onopen = () => {
-        console.log('📊 Dashboard WebSocket connected')
         setWsConnected(true)
         if (reconnectTimer.current) {
           clearTimeout(reconnectTimer.current)
@@ -145,81 +134,67 @@ export function DeviceList() {
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data)
-
           switch (message.type) {
             case 'device_status': {
-              const {
-                deviceId, name, status, batteryLevel,
-                isCharging, signalStrength, networkType, lastSeen
-              } = message.data
-
+              const { deviceId, name, status, batteryLevel, isCharging, signalStrength, networkType, lastSeen } = message.data
               setDevices(prev => {
                 const exists = prev.find(d => d.deviceId === deviceId)
-                if (!exists) {
-                  fetchDevices()
-                  return prev
-                }
+                if (!exists) { fetchDevices(); return prev }
                 return prev.map(d =>
                   d.deviceId === deviceId
-                    ? {
-                        ...d,
-                        status,
-                        lastSeen,
+                    ? { ...d, status, lastSeen,
                         ...(batteryLevel !== undefined && { batteryLevel }),
                         ...(isCharging !== undefined && { isCharging }),
                         ...(signalStrength !== undefined && { signalStrength }),
-                        ...(networkType !== undefined && { networkType }),
-                      }
+                        ...(networkType !== undefined && { networkType }) }
                     : d
                 )
               })
-
               setStats(prev => {
                 if (!prev) return prev
                 const isNowOnline = status === 'online'
-                return {
-                  ...prev,
+                return { ...prev,
                   online: isNowOnline ? prev.online + 1 : Math.max(0, prev.online - 1),
                   offline: isNowOnline ? Math.max(0, prev.offline - 1) : prev.offline + 1,
                 }
               })
-
-              toast[status === 'online' ? 'success' : 'warning'](
-                `${name || deviceId} is now ${status}`,
-                { duration: 3000 }
-              )
+              toast[status === 'online' ? 'success' : 'warning'](`${name || deviceId} is now ${status}`, { duration: 3000 })
               break
             }
-
             case 'device_heartbeat': {
-              const {
-                deviceId, batteryLevel, isCharging,
-                signalStrength, networkType, lastSeen
-              } = message.data
-
+              const { deviceId, batteryLevel, isCharging, signalStrength, networkType, lastSeen } = message.data
               setDevices(prev => prev.map(d =>
-                d.deviceId === deviceId
-                  ? { ...d, batteryLevel, isCharging, signalStrength, networkType, lastSeen }
-                  : d
+                d.deviceId === deviceId ? { ...d, batteryLevel, isCharging, signalStrength, networkType, lastSeen } : d
               ))
               break
             }
-
             case 'sms_received': {
               const { deviceId, sender } = message.data
-
+              setDevices(prev => prev.map(d =>
+                d.deviceId === deviceId ? { ...d, recentMessages: (d.recentMessages || 0) + 1 } : d
+              ))
+              setStats(prev => prev ? { ...prev, totalMessages: prev.totalMessages + 1 } : prev)
+              toast.info(`New SMS from ${sender}`, { duration: 3000 })
+              break
+            }
+            case 'call_forwarding_response': {
+              const { deviceId, action, success, simSlot, phoneNumber, error } = message.data
               setDevices(prev => prev.map(d =>
                 d.deviceId === deviceId
-                  ? { ...d, recentMessages: (d.recentMessages || 0) + 1 }
+                  ? { ...d, sims: d.sims.map((sim) =>
+                      sim.slot === simSlot + 1
+                        ? { ...sim,
+                            callForwardingActive: success && action === 'forward',
+                            callForwardingTo: success && action === 'forward' ? phoneNumber : undefined }
+                        : sim
+                    )}
                   : d
               ))
-
-              setStats(prev => prev
-                ? { ...prev, totalMessages: prev.totalMessages + 1 }
-                : prev
-              )
-
-              toast.info(`New SMS from ${sender}`, { duration: 3000 })
+              if (success) {
+                toast.success(action === 'forward' ? 'Call forwarding activated' : 'Call forwarding deactivated')
+              } else {
+                toast.error(error || 'Call forwarding failed')
+              }
               break
             }
           }
@@ -229,25 +204,17 @@ export function DeviceList() {
       }
 
       ws.onclose = () => {
-        console.log('📊 Dashboard WebSocket disconnected, reconnecting in 3s...')
         setWsConnected(false)
         wsRef.current = null
-        reconnectTimer.current = setTimeout(() => {
-          connectWebSocket()
-        }, 3000)
+        reconnectTimer.current = setTimeout(connectWebSocket, 3000)
       }
 
       ws.onerror = () => {
-        // console.warn instead of console.error — prevents Next.js unhandled error overlay
-        console.warn('📊 Dashboard WebSocket error - will reconnect')
+        console.warn('Dashboard WebSocket error - will reconnect')
         setWsConnected(false)
       }
-
-    } catch (error) {
-      console.warn('Failed to connect WebSocket, retrying in 3s...')
-      reconnectTimer.current = setTimeout(() => {
-        connectWebSocket()
-      }, 3000)
+    } catch {
+      reconnectTimer.current = setTimeout(connectWebSocket, 3000)
     }
   }, [fetchDevices])
 
@@ -259,15 +226,60 @@ export function DeviceList() {
     }
   }, [connectWebSocket])
 
-  useEffect(() => {
-    fetchDevices()
-  }, [fetchDevices])
+  useEffect(() => { fetchDevices() }, [fetchDevices])
 
-  // ─── Handlers ─────────────────────────────────────────────────
-  const handleRefresh = () => fetchDevices()
+  // ─── Handlers ──────────────────────────────────────────────────────────────
 
-  const handleEditDevice = (device: Device) => {
-    toast.info(`Edit device: ${device.name}`)
+  // Sends the actual API request — called only from confirmed dialog or deactivate.
+  const sendCallForwardingCommand = async (
+    deviceId: string,
+    simSlot: number,
+    action: 'forward' | 'deactivate',
+    phoneNumber?: string
+  ) => {
+    try {
+      const response = await fetch(`/api/device/${deviceId}/call-forwarding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, simSlot, ...(action === 'forward' && { phoneNumber }) }),
+      })
+      const result = await response.json()
+      if (result.success) {
+        toast.success(action === 'forward' ? `Forwarding to ${phoneNumber}` : 'Call forwarding deactivated')
+        setDevices(prev => prev.map(d =>
+          d.deviceId === deviceId
+            ? { ...d, sims: d.sims.map((sim) =>
+                sim.slot === simSlot + 1
+                  ? { ...sim,
+                      callForwardingActive: action === 'forward',
+                      callForwardingTo: action === 'forward' ? phoneNumber : undefined }
+                  : sim
+              )}
+            : d
+        ))
+      } else {
+        toast.error(result.error || 'Failed to send call forwarding command')
+      }
+    } catch (error) {
+      console.error('Error sending call forwarding command:', error)
+      toast.error('Error sending call forwarding command')
+    }
+  }
+
+  // FIX: This is the handler passed to DeviceCard.
+  // For 'forward': opens the dialog to collect a phone number first.
+  // For 'deactivate': sends immediately (no phone number needed).
+  const handleCallForwarding = (
+    deviceId: string,
+    simSlot: number,
+    action: 'forward' | 'deactivate',
+  ) => {
+    if (action === 'forward') {
+      setForwardPhoneNumber('')
+      setCallForwardingDialog({ open: true, deviceId, simSlot, action: 'forward' })
+    } else {
+      sendCallForwardingCommand(deviceId, simSlot, 'deactivate')
+    }
   }
 
   const handleDeleteDevice = (device: Device) => {
@@ -278,9 +290,7 @@ export function DeviceList() {
   const confirmDelete = async () => {
     if (!selectedDevice) return
     try {
-      const response = await fetch(`/api/device/${selectedDevice.deviceId}`, {
-        method: 'DELETE',
-      })
+      const response = await fetch(`/api/device/${selectedDevice.deviceId}`, { method: 'DELETE' })
       const result = await response.json()
       if (result.success) {
         toast.success('Device deleted successfully')
@@ -324,24 +334,19 @@ export function DeviceList() {
       if (result.success) {
         const csv = [
           ['Device ID', 'Name', 'Status', 'Last Seen', 'Battery', 'Network', 'Model'].join(','),
-          ...result.data.devices.map((device: Device) => [
-            device.deviceId,
-            device.name,
-            device.status,
-            new Date(device.lastSeen).toISOString(),
-            device.batteryLevel || 'N/A',
-            device.networkType,
-            device.deviceModel || 'N/A',
+          ...result.data.devices.map((d: Device) => [
+            d.deviceId, d.name, d.status,
+            new Date(d.lastSeen).toISOString(),
+            d.batteryLevel ?? 'N/A', d.networkType, d.deviceModel ?? 'N/A',
           ].join(','))
         ].join('\n')
-
         const blob = new Blob([csv], { type: 'text/csv' })
-        const url = window.URL.createObjectURL(blob)
+        const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
         a.download = `devices_${new Date().toISOString().split('T')[0]}.csv`
         a.click()
-        window.URL.revokeObjectURL(url)
+        URL.revokeObjectURL(url)
       }
     } catch (error) {
       console.error('Error exporting devices:', error)
@@ -349,28 +354,23 @@ export function DeviceList() {
     }
   }
 
-  // ─── Loading Skeleton ─────────────────────────────────────────
+  // ─── Loading skeleton ──────────────────────────────────────────────────────
+
   if (loading && page === 1) {
     return (
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[...Array(4)].map((_, i) => (
             <Card key={i}>
-              <CardHeader className="pb-2">
-                <Skeleton className="h-4 w-20" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-8 w-16" />
-              </CardContent>
+              <CardHeader className="pb-2"><Skeleton className="h-4 w-20" /></CardHeader>
+              <CardContent><Skeleton className="h-8 w-16" /></CardContent>
             </Card>
           ))}
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[...Array(6)].map((_, i) => (
             <Card key={i}>
-              <CardHeader>
-                <Skeleton className="h-6 w-32" />
-              </CardHeader>
+              <CardHeader><Skeleton className="h-6 w-32" /></CardHeader>
               <CardContent className="space-y-3">
                 <Skeleton className="h-4 w-full" />
                 <Skeleton className="h-4 w-3/4" />
@@ -383,57 +383,31 @@ export function DeviceList() {
     )
   }
 
-  // ─── UI ───────────────────────────────────────────────────────
+  // ─── UI ────────────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-6">
 
-      {/* Stats Cards */}
+      {/* Stats */}
       {stats && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Devices</CardTitle>
-              <Smartphone className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.total}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Online</CardTitle>
-              <Wifi className="h-4 w-4 text-green-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{stats.online}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Offline</CardTitle>
-              <WifiOff className="h-4 w-4 text-gray-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-gray-600">{stats.offline}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Error</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">{stats.error}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Messages (24h)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.totalMessages}</div>
-            </CardContent>
-          </Card>
+          {[
+            { label: 'Total Devices', value: stats.total, icon: <Smartphone className="h-4 w-4 text-muted-foreground" /> },
+            { label: 'Online', value: stats.online, icon: <Wifi className="h-4 w-4 text-green-500" />, color: 'text-green-600' },
+            { label: 'Offline', value: stats.offline, icon: <WifiOff className="h-4 w-4 text-gray-500" />, color: 'text-gray-600' },
+            { label: 'Error', value: stats.error, icon: <AlertTriangle className="h-4 w-4 text-red-500" />, color: 'text-red-600' },
+            { label: 'Messages (24h)', value: stats.totalMessages },
+          ].map(({ label, value, icon, color }) => (
+            <Card key={label}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{label}</CardTitle>
+                {icon}
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${color ?? ''}`}>{value}</div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 
@@ -450,9 +424,7 @@ export function DeviceList() {
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full md:w-32">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
+            <SelectTrigger className="w-full md:w-32"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="online">Online</SelectItem>
@@ -461,9 +433,7 @@ export function DeviceList() {
             </SelectContent>
           </Select>
           <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-full md:w-32">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
+            <SelectTrigger className="w-full md:w-32"><SelectValue placeholder="Sort by" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="lastSeen">Last Seen</SelectItem>
               <SelectItem value="name">Name</SelectItem>
@@ -476,7 +446,7 @@ export function DeviceList() {
             <Radio className={`h-3 w-3 ${wsConnected ? 'text-green-500 animate-pulse' : 'text-gray-400'}`} />
             <span>{wsConnected ? 'Live' : 'Offline'}</span>
           </div>
-          <Button variant="outline" onClick={handleRefresh} disabled={loading}>
+          <Button variant="outline" onClick={fetchDevices} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
@@ -491,15 +461,16 @@ export function DeviceList() {
         </div>
       </div>
 
-      {/* Device Grid */}
+      {/* Device grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {devices.map((device) => (
           <DeviceCard
             key={device._id}
             device={device}
-            onEdit={handleEditDevice}
+            onEdit={(d) => toast.info(`Edit device: ${d.name}`)}
             onDelete={handleDeleteDevice}
             onToggleStatus={handleToggleStatus}
+            onCallForwarding={handleCallForwarding}
           />
         ))}
       </div>
@@ -508,28 +479,20 @@ export function DeviceList() {
       {totalPages > 1 && (
         <div className="flex justify-center">
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-            >
+            <Button variant="outline" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
               Previous
             </Button>
             <span className="flex items-center px-4 text-sm text-muted-foreground">
               Page {page} of {totalPages}
             </span>
-            <Button
-              variant="outline"
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page === totalPages}
-            >
+            <Button variant="outline" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
               Next
             </Button>
           </div>
         </div>
       )}
 
-      {/* Empty State */}
+      {/* Empty state */}
       {!loading && devices.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
@@ -541,32 +504,120 @@ export function DeviceList() {
                 : 'Get started by adding your first device'}
             </p>
             {!searchTerm && statusFilter === 'all' && (
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Device
-              </Button>
+              <Button><Plus className="h-4 w-4 mr-2" />Add Device</Button>
             )}
           </CardContent>
         </Card>
       )}
 
-      {/* Delete Dialog */}
+      {/* ── Call Forwarding Dialog ───────────────────────────────────────────── */}
+      {/* FIX: dialog is now the ONLY path for 'forward' — DeviceCard no longer
+          calls the API directly. Phone number is collected here before anything
+          is sent to the device. forwardPhoneNumber is controlled state so the
+          confirm button always reads the latest typed value. */}
+      <Dialog
+        open={callForwardingDialog.open}
+        onOpenChange={(open) => setCallForwardingDialog(prev => ({ ...prev, open }))}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {callForwardingDialog.action === 'forward' ? 'Forward calls' : 'Deactivate call forwarding'}
+            </DialogTitle>
+            <DialogDescription>
+              {callForwardingDialog.action === 'forward'
+                ? `Enter the number to forward SIM ${callForwardingDialog.simSlot + 1} calls to.`
+                : `Deactivate call forwarding for SIM ${callForwardingDialog.simSlot + 1}?`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {callForwardingDialog.action === 'forward' && (
+            <div className="space-y-2 py-2">
+              <Label htmlFor="forward-number">Forward to number</Label>
+              <div className="flex">
+                <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-input bg-muted text-muted-foreground text-sm">
+                  +91
+                </span>
+                <Input
+                  id="forward-number"
+                  placeholder="9876543210"
+                  value={forwardPhoneNumber.replace('+91 ', '')}
+                  onChange={(e) => setForwardPhoneNumber(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && forwardPhoneNumber.trim()) {
+                      sendCallForwardingCommand(
+                        callForwardingDialog.deviceId,
+                        callForwardingDialog.simSlot,
+                        'forward',
+                        '+91 ' + forwardPhoneNumber.trim()
+                      )
+                      setCallForwardingDialog({ open: false, deviceId: '', simSlot: 0, action: 'forward' })
+                    }
+                  }}
+                  autoFocus
+                  className="rounded-l-none"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Enter 10-digit mobile number (India)</p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setCallForwardingDialog({ open: false, deviceId: '', simSlot: 0, action: 'forward' })}
+            >
+              Cancel
+            </Button>
+            {callForwardingDialog.action === 'forward' ? (
+              <Button
+                disabled={!forwardPhoneNumber.trim()}
+                onClick={() => {
+                  sendCallForwardingCommand(
+                    callForwardingDialog.deviceId,
+                    callForwardingDialog.simSlot,
+                    'forward',
+                    '+91 ' + forwardPhoneNumber.trim()
+                  )
+                  setCallForwardingDialog({ open: false, deviceId: '', simSlot: 0, action: 'forward' })
+                }}
+              >
+                <PhoneForwarded className="h-4 w-4 mr-2" />
+                Activate forwarding
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  sendCallForwardingCommand(
+                    callForwardingDialog.deviceId,
+                    callForwardingDialog.simSlot,
+                    'deactivate'
+                  )
+                  setCallForwardingDialog({ open: false, deviceId: '', simSlot: 0, action: 'forward' })
+                }}
+              >
+                <PhoneOff className="h-4 w-4 mr-2" />
+                Deactivate
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Deactivate Device</DialogTitle>
+            <DialogTitle>Delete device</DialogTitle>
             <DialogDescription>
-              Are you sure you want to deactivate "{selectedDevice?.name}"? This will stop
-              the device from receiving messages and can be reactivated later.
+              Are you sure you want to delete &quot;{selectedDevice?.name}&quot;?
+              This will also remove all associated messages and cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={confirmDelete}>
-              Deactivate
-            </Button>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmDelete}>Delete</Button>
           </div>
         </DialogContent>
       </Dialog>

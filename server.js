@@ -9,13 +9,17 @@ const dev = process.env.NODE_ENV !== 'production';
 const hostname = '0.0.0.0';
 const port = process.env.PORT || 3000;
 
+// Set global wsManager for API routes to access
+global.wsManager = null;
+
 // Create Next.js app
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 // WebSocket Manager
-import WebSocketManager from './lib/websocket/manager.js';
+import WebSocketManager, { getWsManager } from './lib/websocket/manager.js';
 const wsManager = new WebSocketManager();
+global.wsManager = wsManager; // Make available globally for API routes
 
 // MongoDB Connection
 async function connectDB() {
@@ -161,4 +165,4 @@ app.prepare().then(() => {
   });
 });
 
-export { wsManager };
+export { wsManager, getWsManager };
