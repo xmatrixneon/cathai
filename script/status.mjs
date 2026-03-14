@@ -46,12 +46,14 @@ async function syncDeviceNumbers() {
 
     const indiaId = await getIndiaId();
     const allDeviceNumberPorts = new Set();
+    const syncedPhoneNumbers = new Set(); // Track all synced phone numbers
     let syncedCount = 0;
     let deactivatedCount = 0;
     let numberChangedCount = 0;
     let statusChangedOnline = 0;
     let statusChangedOffline = 0;
 
+    // First pass: Sync all devices and track their numbers
     for (const device of activeDevices) {
       const isOnline = device.lastHeartbeat >= fiveMinutesAgo;
       const newStatus = isOnline ? 'online' : 'offline';
@@ -68,6 +70,19 @@ async function syncDeviceNumbers() {
         }
       }
 
+      // Only sync numbers from ONLINE devices
+      // Offline devices should not override numbers from online devices
+      if (!isOnline) {
+        const result = await Numbers.updateMany(
+          { port: { $regex: `^${device.deviceId}-SIM` }, active: true },
+          { $set: { active: false, signal: 0 } }
+        );
+        if (result.modifiedCount > 0) {
+          deactivatedCount += result.modifiedCount;
+        }
+        continue; // Skip syncing numbers from offline devices
+      }
+
       for (const sim of device.sims) {
         if (sim.phoneNumber && sim.isActive) {
           const port = `${device.deviceId}-SIM${sim.slot}`;
@@ -80,6 +95,8 @@ async function syncDeviceNumbers() {
           phoneNumber = parseInt(phoneNumber);
 
           if (phoneNumber && phoneNumber.toString().length === 10) {
+            syncedPhoneNumbers.add(phoneNumber);
+
             // Deactivate old number if SIM number changed on same port
             const oldNumbers = await Numbers.find({ port, number: { $ne: phoneNumber }, active: true });
             if (oldNumbers.length > 0) {
@@ -116,26 +133,17 @@ async function syncDeviceNumbers() {
           }
         }
       }
-
-      if (!isOnline) {
-        const result = await Numbers.updateMany(
-          { port: { $regex: `^${device.deviceId}-SIM` }, active: true },
-          { $set: { active: false, signal: 0 } }
-        );
-        if (result.modifiedCount > 0) {
-          deactivatedCount += result.modifiedCount;
-        }
-      }
     }
 
-    // Cleanup stale ports
+    // Cleanup stale ports (only deactivate if number was NOT synced in this run)
     const staleNumbers = await Numbers.find({
       port: { $regex: /^.*-SIM[0-9]+$/ },
       active: true
     });
 
     for (const num of staleNumbers) {
-      if (!allDeviceNumberPorts.has(num.port)) {
+      // Only deactivate if port is stale AND number wasn't synced
+      if (!allDeviceNumberPorts.has(num.port) && !syncedPhoneNumbers.has(num.number)) {
         await Numbers.findByIdAndUpdate(num._id, {
           $set: { active: false, signal: 0 }
         });
