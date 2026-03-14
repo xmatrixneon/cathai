@@ -47,7 +47,7 @@ interface DeviceCardProps {
   // FIX: removed phoneNumber param — DeviceCard never knows the destination
   // number. The parent (DeviceList) collects it via the dialog before calling
   // sendCallForwardingCommand. DeviceCard only signals intent.
-  onCallForwarding?: (deviceId: string, simSlot: number, action: 'forward' | 'deactivate') => void
+  onCallForwarding?: (deviceId: string, simSlot: number, action: 'forward' | 'deactivate', currentNumber?: string) => void
 }
 
 export function DeviceCard({ device, onEdit, onDelete, onToggleStatus, onCallForwarding }: DeviceCardProps) {
@@ -124,12 +124,14 @@ export function DeviceCard({ device, onEdit, onDelete, onToggleStatus, onCallFor
               {isOnline && onCallForwarding && device.sims[0] && (
                 <>
                   <DropdownMenuItem
-                    onClick={() => onCallForwarding(device.deviceId, 0, 'forward')}
+                    onClick={() => onCallForwarding(device.deviceId, 0, 'forward', device.sims[0].callForwardingTo)}
                   >
                     <PhoneForwarded className="h-4 w-4 mr-2" />
-                    Forward SIM 1
+                    {device.sims[0].callForwardingActive ? 'Edit SIM 1' : 'Forward SIM 1'}
                     {device.sims[0].callForwardingActive && (
-                      <span className="ml-auto text-xs text-green-600 font-semibold">Active</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        → {device.sims[0].callForwardingTo?.replace('+91 ', '')}
+                      </span>
                     )}
                   </DropdownMenuItem>
                   <DropdownMenuItem
@@ -144,12 +146,14 @@ export function DeviceCard({ device, onEdit, onDelete, onToggleStatus, onCallFor
               {isOnline && onCallForwarding && device.sims.length > 1 && device.sims[1] && (
                 <>
                   <DropdownMenuItem
-                    onClick={() => onCallForwarding(device.deviceId, 1, 'forward')}
+                    onClick={() => onCallForwarding(device.deviceId, 1, 'forward', device.sims[1].callForwardingTo)}
                   >
                     <PhoneForwarded className="h-4 w-4 mr-2" />
-                    Forward SIM 2
+                    {device.sims[1].callForwardingActive ? 'Edit SIM 2' : 'Forward SIM 2'}
                     {device.sims[1].callForwardingActive && (
-                      <span className="ml-auto text-xs text-green-600 font-semibold">Active</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        → {device.sims[1].callForwardingTo?.replace('+91 ', '')}
+                      </span>
                     )}
                   </DropdownMenuItem>
                   <DropdownMenuItem
@@ -206,9 +210,13 @@ export function DeviceCard({ device, onEdit, onDelete, onToggleStatus, onCallFor
                       {sim.phoneNumber && `: ${sim.phoneNumber.slice(-4)}`}
                     </Badge>
                     {sim.callForwardingActive && (
-                      <Badge variant="secondary" className="text-xs gap-1">
+                      <Badge
+                        variant="secondary"
+                        className="text-xs gap-1 cursor-pointer hover:bg-blue-100 transition-colors"
+                        onClick={() => onCallForwarding?.(device.deviceId, sim.slot - 1, 'forward', sim.callForwardingTo)}
+                      >
                         <PhoneForwarded className="h-3 w-3" />
-                        Forwarded
+                        → {sim.callForwardingTo || 'Unknown'}
                       </Badge>
                     )}
                   </div>
@@ -218,24 +226,38 @@ export function DeviceCard({ device, onEdit, onDelete, onToggleStatus, onCallFor
                       opens the dialog for 'forward'. */}
                   {isOnline && sim.isActive && onCallForwarding && (
                     <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                        onClick={() => onCallForwarding(device.deviceId, sim.slot - 1, 'forward')}
-                      >
-                        <PhoneForwarded className="h-3 w-3 mr-1" />
-                        Forward
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                        onClick={() => onCallForwarding(device.deviceId, sim.slot - 1, 'deactivate')}
-                      >
-                        <PhoneOff className="h-3 w-3 mr-1" />
-                        Unforward
-                      </Button>
+                      {sim.callForwardingActive ? (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            onClick={() => onCallForwarding(device.deviceId, sim.slot - 1, 'forward', sim.callForwardingTo)}
+                          >
+                            <PhoneForwarded className="h-3 w-3 mr-1" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => onCallForwarding(device.deviceId, sim.slot - 1, 'deactivate')}
+                          >
+                            <PhoneOff className="h-3 w-3 mr-1" />
+                            Unforward
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          onClick={() => onCallForwarding(device.deviceId, sim.slot - 1, 'forward')}
+                        >
+                          <PhoneForwarded className="h-3 w-3 mr-1" />
+                          Forward
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

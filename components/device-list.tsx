@@ -140,13 +140,29 @@ export function DeviceList() {
               setDevices(prev => {
                 const exists = prev.find(d => d.deviceId === deviceId)
                 if (!exists) { fetchDevices(); return prev }
+                const now = new Date()
+                const lastSeenDate = new Date(lastSeen)
+                const diffMs = now.getTime() - lastSeenDate.getTime()
+                const diffMins = Math.floor(diffMs / 60000)
+                const diffHours = Math.floor(diffMs / 3600000)
+                const diffDays = Math.floor(diffMs / 86400000)
+
                 return prev.map(d =>
                   d.deviceId === deviceId
-                    ? { ...d, status, lastSeen,
+                    ? {
+                        ...d,
+                        status,
+                        lastSeen,
+                        timeSinceLastSeen: {
+                          minutes: diffMins % 60,
+                          hours: diffHours % 24,
+                          days: diffDays
+                        },
                         ...(batteryLevel !== undefined && { batteryLevel }),
                         ...(isCharging !== undefined && { isCharging }),
                         ...(signalStrength !== undefined && { signalStrength }),
-                        ...(networkType !== undefined && { networkType }) }
+                        ...(networkType !== undefined && { networkType })
+                      }
                     : d
                 )
               })
@@ -163,8 +179,29 @@ export function DeviceList() {
             }
             case 'device_heartbeat': {
               const { deviceId, batteryLevel, isCharging, signalStrength, networkType, lastSeen } = message.data
+              const now = new Date()
+              const lastSeenDate = new Date(lastSeen)
+              const diffMs = now.getTime() - lastSeenDate.getTime()
+              const diffMins = Math.floor(diffMs / 60000)
+              const diffHours = Math.floor(diffMs / 3600000)
+              const diffDays = Math.floor(diffMs / 86400000)
+
               setDevices(prev => prev.map(d =>
-                d.deviceId === deviceId ? { ...d, batteryLevel, isCharging, signalStrength, networkType, lastSeen } : d
+                d.deviceId === deviceId
+                  ? {
+                      ...d,
+                      batteryLevel,
+                      isCharging,
+                      signalStrength,
+                      networkType,
+                      lastSeen,
+                      timeSinceLastSeen: {
+                        minutes: diffMins % 60,
+                        hours: diffHours % 24,
+                        days: diffDays
+                      }
+                    }
+                  : d
               ))
               break
             }
@@ -268,14 +305,19 @@ export function DeviceList() {
 
   // FIX: This is the handler passed to DeviceCard.
   // For 'forward': opens the dialog to collect a phone number first.
+  // If currentNumber is provided, pre-fills the dialog for editing.
   // For 'deactivate': sends immediately (no phone number needed).
   const handleCallForwarding = (
     deviceId: string,
     simSlot: number,
     action: 'forward' | 'deactivate',
+    currentNumber?: string,
   ) => {
     if (action === 'forward') {
-      setForwardPhoneNumber('')
+      // If currentNumber is provided, pre-fill the dialog (edit mode)
+      // Remove the +91 prefix for the input field
+      const numberWithoutPrefix = currentNumber?.replace('+91 ', '') || ''
+      setForwardPhoneNumber(numberWithoutPrefix)
       setCallForwardingDialog({ open: true, deviceId, simSlot, action: 'forward' })
     } else {
       sendCallForwardingCommand(deviceId, simSlot, 'deactivate')
