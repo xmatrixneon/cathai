@@ -38,6 +38,8 @@ interface Device {
     slot: number
     phoneNumber?: string
     carrier?: string
+    signalStrength?: number
+    networkType?: string
     isActive: boolean
     callForwardingActive?: boolean
     callForwardingTo?: string
@@ -54,6 +56,27 @@ interface DeviceStats {
   totalMessages: number
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Compute timeSinceLastSeen from a raw ISO lastSeen string.
+ * Extracted so both the WebSocket handler and the tick interval use the
+ * exact same logic — no drift between the two paths.
+ */
+function computeTimeSince(lastSeen: string) {
+  const diffMs    = Date.now() - new Date(lastSeen).getTime()
+  const diffMins  = Math.floor(diffMs / 60_000)
+  const diffHours = Math.floor(diffMs / 3_600_000)
+  const diffDays  = Math.floor(diffMs / 86_400_000)
+  return {
+    minutes: diffMins  % 60,
+    hours:   diffHours % 24,
+    days:    diffDays,
+  }
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function DeviceList() {
   const [devices, setDevices] = useState<Device[]>([])
   const [stats, setStats] = useState<DeviceStats | null>(null)
@@ -68,9 +91,6 @@ export function DeviceList() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [wsConnected, setWsConnected] = useState(false)
 
-  // FIX: forwardPhoneNumber is a separate controlled string so the Input is
-  // a proper controlled component and the value is always up to date when
-  // the confirm button fires.
   const [forwardPhoneNumber, setForwardPhoneNumber] = useState('')
   const [callForwardingDialog, setCallForwardingDialog] = useState<{
     open: boolean
@@ -112,6 +132,24 @@ export function DeviceList() {
     }
   }, [page, statusFilter, sortBy, sortOrder, searchTerm])
 
+  // ─── Live clock: recompute timeSinceLastSeen every 60 seconds ─────────────
+  //
+  // FIX: timeSinceLastSeen was computed once when the WebSocket message arrived
+  // and then frozen. An offline device showed "Just now" forever instead of
+  // counting up. This effect re-derives the value from the raw lastSeen ISO
+  // string every minute for every device so the label is always accurate.
+  useEffect(() => {
+    const tick = setInterval(() => {
+      setDevices(prev =>
+        prev.map(d => ({
+          ...d,
+          timeSinceLastSeen: computeTimeSince(d.lastSeen),
+        }))
+      )
+    }, 60_000)
+    return () => clearInterval(tick)
+  }, []) // no deps — runs once, cleans up on unmount
+
   // ─── WebSocket ─────────────────────────────────────────────────────────────
 
   const connectWebSocket = useCallback(() => {
@@ -135,33 +173,24 @@ export function DeviceList() {
         try {
           const message = JSON.parse(event.data)
           switch (message.type) {
+
             case 'device_status': {
-              const { deviceId, name, status, batteryLevel, isCharging, signalStrength, networkType, lastSeen } = message.data
+              const { deviceId, name, status, batteryLevel, isCharging,
+                      signalStrength, networkType, lastSeen } = message.data
               setDevices(prev => {
                 const exists = prev.find(d => d.deviceId === deviceId)
                 if (!exists) { fetchDevices(); return prev }
-                const now = new Date()
-                const lastSeenDate = new Date(lastSeen)
-                const diffMs = now.getTime() - lastSeenDate.getTime()
-                const diffMins = Math.floor(diffMs / 60000)
-                const diffHours = Math.floor(diffMs / 3600000)
-                const diffDays = Math.floor(diffMs / 86400000)
-
                 return prev.map(d =>
                   d.deviceId === deviceId
                     ? {
-                        ...d,
-                        status,
-                        lastSeen,
-                        timeSinceLastSeen: {
-                          minutes: diffMins % 60,
-                          hours: diffHours % 24,
-                          days: diffDays
-                        },
-                        ...(batteryLevel !== undefined && { batteryLevel }),
-                        ...(isCharging !== undefined && { isCharging }),
+                        ...d, status, lastSeen,
+                        // FIX: use shared helper so timeSinceLastSeen is always
+                        // computed from the actual timestamp, not ad-hoc math.
+                        timeSinceLastSeen: computeTimeSince(lastSeen),
+                        ...(batteryLevel   !== undefined && { batteryLevel }),
+                        ...(isCharging     !== undefined && { isCharging }),
                         ...(signalStrength !== undefined && { signalStrength }),
-                        ...(networkType !== undefined && { networkType })
+                        ...(networkType    !== undefined && { networkType }),
                       }
                     : d
                 )
@@ -169,62 +198,82 @@ export function DeviceList() {
               setStats(prev => {
                 if (!prev) return prev
                 const isNowOnline = status === 'online'
-                return { ...prev,
-                  online: isNowOnline ? prev.online + 1 : Math.max(0, prev.online - 1),
+                return {
+                  ...prev,
+                  online:  isNowOnline ? prev.online + 1 : Math.max(0, prev.online - 1),
                   offline: isNowOnline ? Math.max(0, prev.offline - 1) : prev.offline + 1,
                 }
               })
-              toast[status === 'online' ? 'success' : 'warning'](`${name || deviceId} is now ${status}`, { duration: 3000 })
+              toast[status === 'online' ? 'success' : 'warning'](
+                `${name || deviceId} is now ${status}`, { duration: 3000 }
+              )
               break
             }
-            case 'device_heartbeat': {
-              const { deviceId, batteryLevel, isCharging, signalStrength, networkType, lastSeen } = message.data
-              const now = new Date()
-              const lastSeenDate = new Date(lastSeen)
-              const diffMs = now.getTime() - lastSeenDate.getTime()
-              const diffMins = Math.floor(diffMs / 60000)
-              const diffHours = Math.floor(diffMs / 3600000)
-              const diffDays = Math.floor(diffMs / 86400000)
 
+            case 'device_heartbeat': {
+              const { deviceId, batteryLevel, isCharging, signalStrength,
+                      networkType, sims, lastSeen } = message.data
               setDevices(prev => prev.map(d =>
                 d.deviceId === deviceId
                   ? {
                       ...d,
-                      batteryLevel,
-                      isCharging,
-                      signalStrength,
-                      networkType,
+                      batteryLevel, isCharging, signalStrength, networkType,
                       lastSeen,
-                      timeSinceLastSeen: {
-                        minutes: diffMins % 60,
-                        hours: diffHours % 24,
-                        days: diffDays
-                      }
+                      timeSinceLastSeen: computeTimeSince(lastSeen),
+                      // FIX: merge incoming sims from heartbeat so per-SIM signal
+                      // strength and network type stay current after registration.
+                      // Only overwrite fields that the heartbeat actually carries;
+                      // preserve callForwardingActive/callForwardingTo from DB.
+                      ...(sims && {
+                        sims: d.sims.map(existing => {
+                          const updated = sims.find((s: { slot: number }) => s.slot === existing.slot)
+                          if (!updated) return existing
+                          return {
+                            ...existing,
+                            carrier:       updated.carrier       ?? existing.carrier,
+                            signalStrength: updated.signalStrength ?? existing.signalStrength,
+                            networkType:   updated.networkType   ?? existing.networkType,
+                            isActive:      updated.isActive      ?? existing.isActive,
+                            // Preserve forwarding state — heartbeat doesn't carry it
+                            callForwardingActive: existing.callForwardingActive,
+                            callForwardingTo:     existing.callForwardingTo,
+                          }
+                        }),
+                      }),
                     }
                   : d
               ))
               break
             }
+
             case 'sms_received': {
               const { deviceId, sender } = message.data
               setDevices(prev => prev.map(d =>
-                d.deviceId === deviceId ? { ...d, recentMessages: (d.recentMessages || 0) + 1 } : d
+                d.deviceId === deviceId
+                  ? { ...d, recentMessages: (d.recentMessages || 0) + 1 }
+                  : d
               ))
               setStats(prev => prev ? { ...prev, totalMessages: prev.totalMessages + 1 } : prev)
               toast.info(`New SMS from ${sender}`, { duration: 3000 })
               break
             }
+
             case 'call_forwarding_response': {
               const { deviceId, action, success, simSlot, phoneNumber, error } = message.data
               setDevices(prev => prev.map(d =>
                 d.deviceId === deviceId
-                  ? { ...d, sims: d.sims.map((sim) =>
-                      sim.slot === simSlot + 1
-                        ? { ...sim,
-                            callForwardingActive: success && action === 'forward',
-                            callForwardingTo: success && action === 'forward' ? phoneNumber : undefined }
-                        : sim
-                    )}
+                  ? {
+                      ...d,
+                      sims: d.sims.map(sim =>
+                        sim.slot === simSlot
+                          ? {
+                              ...sim,
+                              callForwardingActive: success && action === 'forward',
+                              callForwardingTo: success && action === 'forward' ? phoneNumber : undefined,
+                            }
+                          : sim
+                      ),
+                    }
                   : d
               ))
               if (success) {
@@ -267,7 +316,6 @@ export function DeviceList() {
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
 
-  // Sends the actual API request — called only from confirmed dialog or deactivate.
   const sendCallForwardingCommand = async (
     deviceId: string,
     simSlot: number,
@@ -285,13 +333,18 @@ export function DeviceList() {
         toast.success(action === 'forward' ? `Forwarding to ${phoneNumber}` : 'Call forwarding deactivated')
         setDevices(prev => prev.map(d =>
           d.deviceId === deviceId
-            ? { ...d, sims: d.sims.map((sim) =>
-                sim.slot === simSlot + 1
-                  ? { ...sim,
-                      callForwardingActive: action === 'forward',
-                      callForwardingTo: action === 'forward' ? phoneNumber : undefined }
-                  : sim
-              )}
+            ? {
+                ...d,
+                sims: d.sims.map(sim =>
+                  sim.slot === simSlot + 1
+                    ? {
+                        ...sim,
+                        callForwardingActive: action === 'forward',
+                        callForwardingTo: action === 'forward' ? phoneNumber : undefined,
+                      }
+                    : sim
+                ),
+              }
             : d
         ))
       } else {
@@ -303,10 +356,6 @@ export function DeviceList() {
     }
   }
 
-  // FIX: This is the handler passed to DeviceCard.
-  // For 'forward': opens the dialog to collect a phone number first.
-  // If currentNumber is provided, pre-fills the dialog for editing.
-  // For 'deactivate': sends immediately (no phone number needed).
   const handleCallForwarding = (
     deviceId: string,
     simSlot: number,
@@ -314,10 +363,7 @@ export function DeviceList() {
     currentNumber?: string,
   ) => {
     if (action === 'forward') {
-      // If currentNumber is provided, pre-fill the dialog (edit mode)
-      // Remove the +91 prefix for the input field
-      const numberWithoutPrefix = currentNumber?.replace('+91 ', '') || ''
-      setForwardPhoneNumber(numberWithoutPrefix)
+      setForwardPhoneNumber(currentNumber?.replace('+91 ', '') || '')
       setCallForwardingDialog({ open: true, deviceId, simSlot, action: 'forward' })
     } else {
       sendCallForwardingCommand(deviceId, simSlot, 'deactivate')
@@ -435,9 +481,9 @@ export function DeviceList() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           {[
             { label: 'Total Devices', value: stats.total, icon: <Smartphone className="h-4 w-4 text-muted-foreground" /> },
-            { label: 'Online', value: stats.online, icon: <Wifi className="h-4 w-4 text-green-500" />, color: 'text-green-600' },
+            { label: 'Online',  value: stats.online,  icon: <Wifi className="h-4 w-4 text-green-500" />, color: 'text-green-600' },
             { label: 'Offline', value: stats.offline, icon: <WifiOff className="h-4 w-4 text-gray-500" />, color: 'text-gray-600' },
-            { label: 'Error', value: stats.error, icon: <AlertTriangle className="h-4 w-4 text-red-500" />, color: 'text-red-600' },
+            { label: 'Error',   value: stats.error,   icon: <AlertTriangle className="h-4 w-4 text-red-500" />, color: 'text-red-600' },
             { label: 'Messages (24h)', value: stats.totalMessages },
           ].map(({ label, value, icon, color }) => (
             <Card key={label}>
@@ -552,11 +598,7 @@ export function DeviceList() {
         </Card>
       )}
 
-      {/* ── Call Forwarding Dialog ───────────────────────────────────────────── */}
-      {/* FIX: dialog is now the ONLY path for 'forward' — DeviceCard no longer
-          calls the API directly. Phone number is collected here before anything
-          is sent to the device. forwardPhoneNumber is controlled state so the
-          confirm button always reads the latest typed value. */}
+      {/* Call Forwarding Dialog */}
       <Dialog
         open={callForwardingDialog.open}
         onOpenChange={(open) => setCallForwardingDialog(prev => ({ ...prev, open }))}
