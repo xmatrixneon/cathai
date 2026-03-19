@@ -33,7 +33,7 @@ const deviceSchema = new mongoose.Schema({
   signalStrength: {
     type: Number,
     min: 0,
-    max: 4,
+    max: 5,
     default: 0,
   },
   networkType: {
@@ -60,7 +60,7 @@ const deviceSchema = new mongoose.Schema({
     signalStrength: {
       type: Number,
       min: 0,
-      max: 4,
+      max: 5,
       default: 0,
     },
     // FIX #4: Added networkType to the sims subdocument. Previously this field

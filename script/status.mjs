@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import Numbers from "../models/Numbers.js";
 import Country from "../models/Countires.js";
 import Device from "../models/Device.js";
+import Message from "../models/Message.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -14,6 +15,64 @@ config({ path: join(__dirname, "..", ".env.local") });
 config({ path: join(__dirname, "..", ".env") });
 
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
+
+async function cleanupStaleDevices() {
+  const AUTO_DELETE_ENABLED = process.env.DEVICE_AUTO_DELETE_ENABLED !== 'false';
+  const AUTO_DELETE_HOURS = parseInt(process.env.DEVICE_AUTO_DELETE_HOURS || '24');
+
+  if (!AUTO_DELETE_ENABLED) {
+    return;
+  }
+
+  const cutoffTime = new Date(Date.now() - AUTO_DELETE_HOURS * 60 * 60 * 1000);
+
+  try {
+    const staleDevices = await Device.find({
+      lastHeartbeat: { $lt: cutoffTime },
+      isActive: true
+    });
+
+    if (staleDevices.length === 0) {
+      return;
+    }
+
+    console.log(`\n${'─'.repeat(55)}`);
+    console.log(`🧹 CLEANUP: Found ${staleDevices.length} device(s) offline for ${AUTO_DELETE_HOURS}+ hours`);
+    console.log(`${'─'.repeat(55)}`);
+
+    let deletedCount = 0;
+    let errorCount = 0;
+
+    for (const device of staleDevices) {
+      try {
+        // Delete associated messages
+        const messagesDeleted = await Message.deleteMany({ 'metadata.deviceId': device.deviceId });
+
+        // Deactivate all numbers from this device
+        const numbersDeactivated = await Numbers.updateMany(
+          { port: { $regex: `^${device.deviceId}-SIM` } },
+          { $set: { active: false, signal: 0 } }
+        );
+
+        // Delete the device
+        await Device.deleteOne({ _id: device._id });
+
+        deletedCount++;
+        console.log(`🗑️ DELETED  ${device.deviceId} (${device.name || 'unnamed'})`);
+        console.log(`   Messages deleted: ${messagesDeleted.deletedCount}, Numbers deactivated: ${numbersDeactivated.modifiedCount}`);
+      } catch (err) {
+        errorCount++;
+        console.error(`❌ Failed to delete device ${device.deviceId}: ${err.message}`);
+      }
+    }
+
+    console.log(`${'─'.repeat(55)}`);
+    console.log(`✅ CLEANUP DONE: Deleted ${deletedCount} device(s)${errorCount > 0 ? `, ${errorCount} error(s)` : ''}`);
+    console.log(`${'─'.repeat(55)}`);
+  } catch (err) {
+    console.error(`❌ CLEANUP ERROR: ${err.message}`);
+  }
+}
 
 async function getIndiaId() {
   const country = await Country.findOne({ name: "India" });
@@ -170,6 +229,9 @@ async function syncDeviceNumbers() {
       console.log(`   Status chg:   +${statusChangedOnline} online  -${statusChangedOffline} offline`);
     console.log(`   Numbers now:  Total: ${totalNumbersAfter}  ✅ Active: ${activeNumbersAfter}  ❌ Inactive: ${totalNumbersAfter - activeNumbersAfter}`);
     console.log(`${'─'.repeat(55)}\n`);
+
+    // Run cleanup of stale devices after sync
+    await cleanupStaleDevices();
 
   } catch (err) {
     console.error(`\n❌ SYNC ERROR  ${timestamp}`);

@@ -161,7 +161,7 @@ export default function ActiveOrdersPage() {
                           <Badge variant="outline">{order.messageCount}</Badge>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {new Date(order.createdAt).toLocaleString()}
+                          {order.createdAt || "N/A"}
                         </TableCell>
                       </TableRow>
                     ))}
