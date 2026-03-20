@@ -153,8 +153,8 @@ if (order.maxmessage !== 0 && messageLength >= order.maxmessage) {
 // ✅ Base time = updatedAt ya createdAt
 const baseTime = order.updatedAt || order.createdAt;
 
-// ✅ 5 sec kam karke naya sinceTime
-const sinceTime = new Date(baseTime.getTime() - 10000);
+// ✅ Look back 3 minutes to catch any delayed messages
+const sinceTime = new Date(baseTime.getTime() - 180000);
 
 // ✅ Sirf uske baad ke messages uthao
 const timeFilter = {

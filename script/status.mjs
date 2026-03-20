@@ -152,8 +152,10 @@ async function syncDeviceNumbers() {
           allDeviceNumberPorts.add(port);
 
           let phoneNumber = String(sim.phoneNumber).replace(/\D/g, '');
-          if (phoneNumber.length === 12 && phoneNumber.startsWith("91")) {
-            phoneNumber = phoneNumber.substring(2);
+          // Handle Indian phone numbers: remove 91 prefix from various formats
+          // Formats: 919123456789 (12 digits), +919123456789 (becomes 12 after strip), etc.
+          if (phoneNumber.length > 10 && phoneNumber.startsWith("91")) {
+            phoneNumber = phoneNumber.substring(phoneNumber.length - 10);
           }
           phoneNumber = parseInt(phoneNumber);
 
