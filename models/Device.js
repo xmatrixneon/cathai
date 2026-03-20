@@ -106,6 +106,8 @@ const deviceSchema = new mongoose.Schema({
   apiKey:   { type: String, required: false, unique: false, index: false },
   isActive: { type: Boolean, default: true },
   notes:    { type: String,  default: null },
+  isFavorite: { type: Boolean, default: false },
+  favoritedAt: { type: Date, default: null },
   registeredAt:  { type: Date, default: Date.now },
   lastHeartbeat: { type: Date, default: Date.now },
 }, {
@@ -115,6 +117,7 @@ const deviceSchema = new mongoose.Schema({
 deviceSchema.index({ status: 1 });
 deviceSchema.index({ lastHeartbeat: 1 });
 deviceSchema.index({ 'sims.phoneNumber': 1 });
+deviceSchema.index({ isFavorite: 1 });
 // FIX #8: Index on sims.slot supports the positional $ operator queries used in
 // handleCallForwardingResponse — findOneAndUpdate({ "sims.slot": N }, { "sims.$": ... })
 // performs a collection scan without this index on large device collections.
