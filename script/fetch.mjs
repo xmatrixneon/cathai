@@ -42,7 +42,16 @@ function buildSmartOtpRegexList(formats) {
 
       let pattern = escapeRegex(format);
 
-      pattern = pattern.replace(/\\\{otp\\\}/gi, "(?<otp>[A-Za-z0-9\\-]{3,12})"); 
+      // ✅ Handle multiple {otp} - first one gets named group, rest get non-capturing
+      let isFirstOtp = true;
+      pattern = pattern.replace(/\\\{otp\\\}/gi, () => {
+        if (isFirstOtp) {
+          isFirstOtp = false;
+          return "(?<otp>[A-Za-z0-9\\-]{3,12})";
+        }
+        return "(?:[A-Za-z0-9\\-]{3,12})"; // non-capturing group for subsequent {otp}
+      });
+
       pattern = pattern.replace(/\\\{date\\\}/gi, ".*");
       pattern = pattern.replace(/\\\{datetime\\\}/gi, ".*");
       pattern = pattern.replace(/\\\{time\\\}/gi, ".*");
@@ -171,8 +180,8 @@ const timeFilter = {
         { receiver: numberWithCountry },
       ];
       
-      // Also match receivers that might have 91 prefix when order doesn't
-      if (order.dialcode === 91 && orderNumberStr.length === 10 && !orderNumberStr.startsWith('91')) {
+      // Also match receivers that might have 91 prefix (for all 10-digit Indian numbers)
+      if (order.dialcode === 91 && orderNumberStr.length === 10) {
         receiverMatches.push({ receiver: `91${orderNumberStr}` });
         receiverMatches.push({ receiver: `+91${orderNumberStr}` });
       }

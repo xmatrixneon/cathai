@@ -23,7 +23,17 @@ function buildSmartOtpRegexList(formats) {
 
       let pattern = escapeRegex(format);
 
-      pattern = pattern.replace(/\\\{otp\\\}/gi, "(?<otp>[A-Za-z0-9\\-]{3,12})"); 
+      // First {otp} gets named capture group, subsequent ones get non-capturing group
+      // This prevents "Duplicate capture group name" regex errors
+      let isFirstOtp = true;
+      pattern = pattern.replace(/\\\{otp\\\}/gi, () => {
+        if (isFirstOtp) {
+          isFirstOtp = false;
+          return "(?<otp>[A-Za-z0-9\\-]{3,12})";
+        }
+        return "(?:[A-Za-z0-9\\-]{3,12})";
+      });
+
       pattern = pattern.replace(/\\\{date\\\}/gi, ".*");
       pattern = pattern.replace(/\\\{datetime\\\}/gi, ".*");
       pattern = pattern.replace(/\\\{time\\\}/gi, ".*");

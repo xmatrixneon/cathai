@@ -191,9 +191,26 @@ async function syncDeviceNumbers() {
           // Clean and validate phone number
           let phoneNumber = String(sim.phoneNumber).replace(/\D/g, '');
           // Handle Indian phone numbers: remove 91 prefix from various formats
-          // Formats: 919123456789 (12 digits), +919123456789 (becomes 12 after strip), etc.
+          // Indian mobile numbers must start with 6, 7, 8, or 9
+          const isValidIndianMobile = (num) => /^[6-9]\d{9}$/.test(num);
+
           if (phoneNumber.length > 10 && phoneNumber.startsWith("91")) {
-            phoneNumber = phoneNumber.substring(phoneNumber.length - 10);
+            // First try: extract 10 digits after country code "91"
+            let extracted = phoneNumber.substring(2, 12);
+
+            // If invalid (doesn't start with 6-9 or not 10 digits), try last 10 digits as fallback
+            if (!isValidIndianMobile(extracted)) {
+              let fallback = phoneNumber.substring(phoneNumber.length - 10);
+              // Only use fallback if it's also valid
+              if (isValidIndianMobile(fallback)) {
+                extracted = fallback;
+              } else {
+                // Both failed - mark as invalid to skip syncing
+                extracted = '';
+              }
+            }
+
+            phoneNumber = extracted;
           }
           phoneNumber = parseInt(phoneNumber);
 
