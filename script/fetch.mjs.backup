@@ -195,30 +195,12 @@ const timeFilter = {
         ],
       };
 
-      let messages = await Message.find({
+      const messages = await Message.find({
         $and: [receiverOrTextFilter, timeFilter],
       }).sort({ createdAt: 1 });
 
-      console.log(`   ✉️  Matched messages (exact): ${messages.length}`);
+      console.log(`   ✉️  Matched messages: ${messages.length}`);
 
-      // 🔍 PARTIAL MATCH FALLBACK: If no messages found, try matching last 10 digits
-      if (messages.length === 0 && orderNumberStr.length >= 10) {
-        const last10Digits = orderNumberStr.slice(-10);
-        const partialReceiverFilter = {
-          $or: [
-            { receiver: new RegExp(last10Digits + ".*", "i") },
-            { message: new RegExp(last10Digits + ".*", "i") },
-          ],
-        };
-
-        messages = await Message.find({
-          $and: [partialReceiverFilter, timeFilter],
-        }).sort({ createdAt: 1 });
-
-        if (messages.length > 0) {
-          console.log(`   🔍 Matched messages (partial): ${messages.length} - using last 10 digits: ${last10Digits}`);
-        }
-      }
       // 🚦 Multi-use logic
       if (order.message.length > 0) {
         if (!order.ismultiuse) {
