@@ -50,9 +50,39 @@ const OrdersSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // Failure reason tracking
+  failureReason: {
+    type: String,
+    enum: ['none', 'expired_no_sms', 'expired_no_recharge', 'user_cancelled', 'early_cancel', 'max_messages'],
+    default: 'none'
+  },
+  // Quality impact tracking
+  qualityImpact: {
+    type: Number,
+    default: 0  // Negative for failures, positive for success
+  },
+  // Number state at order time
+  numberSnapshot: {
+    qualityScore: {
+      type: Number,
+      default: 100
+    },
+    consecutiveFailures: {
+      type: Number,
+      default: 0
+    },
+    signal: {
+      type: Number,
+      default: 0
+    }
+  }
 }, {
   timestamps: true
 });
+
+// Performance indexes for quality management
+OrdersSchema.index({ number: 1, active: 1, failureReason: 1 });
+OrdersSchema.index({ number: 1, createdAt: -1 });
 
 const Orders = mongoose.models.Orders || mongoose.model('Orders', OrdersSchema);
 

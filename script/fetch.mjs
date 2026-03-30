@@ -7,6 +7,7 @@ import Orders from "../models/Orders.js";
 import Message from "../models/Message.js";
 import CronStatus from "../models/Cron.js";
 import Lock from "../models/Lock.js";
+import Numbers from "../models/Numbers.js";
 
 // Get directory path for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -111,11 +112,39 @@ cron.schedule("*/5 * * * * *", async () => {
 
       // 1️⃣ Expire after 15 min
       if (ageMinutes > 15) {
+        // Determine failure reason based on message count
+        let failureReason;
+        let qualityImpact;
+
+        if (order.message.length === 0) {
+          // No SMS received at all - likely no recharge/balance
+          failureReason = 'expired_no_recharge';
+          qualityImpact = -15; // Impact quality score
+        } else {
+          // Some messages received - network issues or delayed OTP
+          failureReason = 'expired_no_sms';
+          qualityImpact = 0; // No quality impact - not the number's fault
+        }
+
+        // Update order with failure reason
         await Orders.updateOne(
           { _id: order._id },
-          { $set: { active: false, updatedAt: now } }
+          {
+            $set: {
+              active: false,
+              updatedAt: now,
+              failureReason: failureReason,
+              qualityImpact: qualityImpact
+            }
+          }
         );
-        console.log(`   ⌛ Order ${order._id} expired`);
+
+        // Update number quality ONLY if no-recharge failure
+        if (qualityImpact !== 0) {
+          await updateNumberQuality(order.number, qualityImpact, failureReason, order._id);
+        }
+
+        console.log(`   ⌛ Order ${order._id} expired (${failureReason})`);
         continue;
       }
 
@@ -266,16 +295,32 @@ for (const regex of otpRegexList) {
             updatedAt: new Date(),
             nextsms: false,
           };
+
+          // First OTP = success
           if (order.message.length === 0) {
             updateFields.isused = true;
-          const newLock = new Lock({
-          number: order.number,
-          countryid: order.countryid,
-           serviceid: order.serviceid,
-           locked: true,
-          });
+            updateFields.failureReason = 'none';
+            updateFields.qualityImpact = 5; // +5 points for success
 
-    await newLock.save();
+            // Record number state snapshot
+            const numDoc = await Numbers.findOne({ number: order.number });
+            updateFields.numberSnapshot = {
+              qualityScore: numDoc ? (numDoc.qualityScore || 100) : 100,
+              consecutiveFailures: numDoc ? (numDoc.consecutiveFailures || 0) : 0,
+              signal: 0 // Can be enhanced later
+            };
+
+            // Update number quality
+            await updateNumberQuality(order.number, 5, 'otp_received', order._id);
+
+            const newLock = new Lock({
+              number: order.number,
+              countryid: order.countryid,
+              serviceid: order.serviceid,
+              locked: true,
+            });
+
+            await newLock.save();
             console.log("      🔒 First OTP received → marking order as used");
           }
 
@@ -307,3 +352,75 @@ for (const regex of otpRegexList) {
     running = false;
   }
 });
+
+// Helper: Get current quality score for a number
+async function getNumberQualityScore(number) {
+  const numDoc = await Numbers.findOne({ number });
+  return numDoc ? numDoc.qualityScore || 100 : 100;
+}
+
+// Helper: Get consecutive failures
+async function getNumberConsecutiveFailures(number) {
+  const numDoc = await Numbers.findOne({ number });
+  return numDoc ? numDoc.consecutiveFailures || 0 : 0;
+}
+
+// Helper: Update number quality in real-time
+async function updateNumberQuality(number, impact, reason, orderId) {
+  const numDoc = await Numbers.findOne({ number });
+
+  if (!numDoc) {
+    console.warn(`      ⚠️ Number ${number} not found for quality update`);
+    return;
+  }
+
+  const now = new Date();
+  let newQualityScore = Math.max(0, Math.min(100, (numDoc.qualityScore || 100) + impact));
+  let newConsecutiveFailures = numDoc.consecutiveFailures || 0;
+  let newFailureCount = numDoc.failureCount || 0;
+  let newSuccessCount = numDoc.successCount || 0;
+
+  // Update counters
+  if (impact > 0) {
+    newSuccessCount++;
+    newConsecutiveFailures = 0; // Reset on success
+    numDoc.lastSuccessAt = now;
+  } else {
+    newFailureCount++;
+    newConsecutiveFailures++;
+    numDoc.lastFailureAt = now;
+  }
+
+  // Add to recent failures (max 50)
+  const recentFailure = {
+    orderId: orderId,
+    serviceid: numDoc.serviceid || null,
+    countryid: numDoc.countryid || null,
+    failedAt: now,
+    reason: reason
+  };
+
+  const recentFailures = numDoc.recentFailures || [];
+  recentFailures.push(recentFailure);
+  if (recentFailures.length > 50) {
+    recentFailures.shift(); // Keep only last 50
+  }
+
+  await Numbers.updateOne(
+    { _id: numDoc._id },
+    {
+      $set: {
+        qualityScore: newQualityScore,
+        failureCount: newFailureCount,
+        successCount: newSuccessCount,
+        consecutiveFailures: newConsecutiveFailures,
+        lastFailureAt: impact < 0 ? now : numDoc.lastFailureAt,
+        lastSuccessAt: impact > 0 ? now : numDoc.lastSuccessAt,
+        recentFailures: recentFailures,
+        lastQualityCheck: now
+      }
+    }
+  );
+
+  console.log(`      📊 Quality ${number}: ${newQualityScore} (${impact > 0 ? '+' : ''}${impact})`);
+}

@@ -39,7 +39,24 @@ npm start             # Start production server (NODE_ENV=production)
 
 # Linting
 npm run lint          # Run Next.js linter
+
+# PM2 Deployment
+pm2 start ecosystem.config.cjs        # Start all apps
+pm2 restart ecosystem.config.cjs     # Restart all apps
+pm2 logs manager                      # View main app logs
+pm2 logs manager:numberstatus        # View status sync logs
+pm2 logs manager:fetchsms            # View SMS fetch logs
+pm2 logs manager:suspendlowsms       # View SMS suspend monitor logs
 ```
+
+## PM2 Apps
+
+The system runs 4 PM2 processes (configured in `ecosystem.config.cjs`):
+
+1. **manager** - Main Next.js app (`npm start`)
+2. **manager:numberstatus** - Device/number status sync script (`script/status.mjs`)
+3. **manager:fetchsms** - SMS fetch script (`script/fetch.mjs`)
+4. **manager:suspendlowsms** - SMS quality monitor (`script/suspend-low-sms.mjs`)
 
 ## Architecture
 
@@ -88,6 +105,48 @@ Runs every 15 seconds via `node-cron`:
 - Numbers port format: `{deviceId}-SIM{slot}` (e.g., "1a2b3c4d-SIM1")
 - Indian phone numbers are normalized (remove "91" prefix, 10 digits)
 
+### SMS Quality Monitor (`script/suspend-low-sms.mjs`)
+
+Runs as PM2 process `manager:suspendlowsms`:
+
+**Suspend check** (every 15 minutes):
+- Counts SMS received per number in last N hours (configurable)
+- Suspends numbers below threshold (default: 0 SMS = suspend all inactive)
+- Updates `lastLowSmsCheck` and `smsReceivedInWindow` fields
+- Increments `lowSmsSuspensionCount` on each suspension
+
+**Recovery check** (every 5 minutes):
+- Checks suspended numbers with `suspensionReason: 'low_sms'`
+- Auto-recovers if SMS count >= threshold
+- Clears suspension fields
+
+**Configuration via env vars:**
+- `SMS_AUTO_SUSPEND_ENABLED` - Master on/off switch
+- `SMS_SUSPEND_THRESHOLD` - Minimum SMS to avoid suspension
+- `SMS_SUSPEND_WINDOW_HOURS` - Rolling time window for counting
+- `SMS_SUSPEND_DRY_RUN` - Test mode without actual changes
+- `SMS_TEST_NUMBER` - Single number testing
+
+### Number Quality Management API
+
+**`/api/numbers/quality`** - Quality tracking and bulk operations
+
+GET - Fetch numbers with quality data:
+- Filters: `all`, `suspended`, `warning`, `active`
+- Pagination + search by phone number
+- Returns global stats (total, active, suspended, avgQuality)
+
+POST - Bulk actions:
+- `suspend` - Suspend numbers with optional reason
+- `recover` - Recover suspended numbers, reset consecutive failures
+- `reset` - Full reset: qualityScore=100, clear suspension, reset counters
+
+PUT - Update single number quality:
+- Set `qualityScore` (0-100)
+- Toggle `suspended` state with `suspensionReason`
+
+DELETE - Soft delete (set `active: false`)
+
 ### Data Models
 
 **Device** (`models/Device.js`):
@@ -106,14 +165,26 @@ Runs every 15 seconds via `node-cron`:
 - `port` - Gateway port like "{deviceId}-SIM1"
 - `active`, `locked`, `operator`, `signal`
 - `lastRotation`, `iccid`, `imsi`
+- **Quality tracking**: `qualityScore` (0-100), `failureCount`, `successCount`, `consecutiveFailures`
+- **Suspension**: `suspended`, `suspensionReason` ('none', 'low_quality', 'manual', 'high_failure_rate', 'no_recharge', 'low_sms'), `suspendedAt`
+- **SMS monitoring**: `lowSmsSuspensionCount`, `lastLowSmsCheck`, `smsReceivedInWindow`
+- **Failure history**: `recentFailures[]` with `orderId`, `serviceid`, `countryid`, `failedAt`, `reason`
+
+**Orders** (`models/Orders.js`):
+- `number`, `countryid`, `serviceid`, `dialcode`
+- `isused`, `ismultiuse`, `nextsms`, `message[]`, `keywords[]`, `formate[]`, `maxmessage`, `active`
+- **Failure tracking**: `failureReason` ('none', 'expired_no_sms', 'expired_no_recharge', 'user_cancelled', 'early_cancel', 'max_messages')
+- **Quality impact**: `qualityImpact` (affects parent number's quality score)
+- **Snapshot**: `numberSnapshot` captures number state at order time
 
 ### API Routes Structure
 
 - `/api/device/*` - Device CRUD, list, stats, send SMS, call forwarding
-- `/api/numbers/*` - Number management
+- `/api/numbers/*` - Number management, quality tracking, bulk operations
 - `/api/messages/*` - Message retrieval
-- `/api/overview/*` - Dashboard statistics
+- `/api/overview/*` - Dashboard statistics, activations, charts
 - `/api/countries/*`, `/api/services/*` - Reference data
+- `/api/locks/*` - Number lock/unlock management
 
 ## Environment Variables
 
@@ -125,6 +196,13 @@ Optional:
 - `PORT` - Server port (default: 3000)
 - `DEVICE_AUTO_DELETE_ENABLED` - Enable auto-delete (default: true)
 - `DEVICE_AUTO_DELETE_HOURS` - Offline hours before deletion (default: 24)
+
+**SMS Auto-Suspend (script/suspend-low-sms.mjs):**
+- `SMS_AUTO_SUSPEND_ENABLED` - Enable SMS-based auto-suspend (default: true)
+- `SMS_SUSPEND_THRESHOLD` - Minimum SMS count to avoid suspension (default: 0)
+- `SMS_SUSPEND_WINDOW_HOURS` - Time window for SMS counting (default: 24)
+- `SMS_SUSPEND_DRY_RUN` - Log actions without executing (default: false)
+- `SMS_TEST_NUMBER` - Test mode: only process this specific number (default: null)
 
 ## TypeScript Configuration
 
@@ -145,6 +223,16 @@ Optional:
 5. **Number Sync Logic**: Offline devices have their numbers deactivated immediately; online devices have their active SIM numbers synced to the Numbers collection.
 
 6. **SIM Swap Detection**: When a phone number changes on the same port, the old number is deactivated and the new one is activated.
+
+7. **Quality Score System**:
+   - Score ranges 0-100, starts at 100 for new numbers
+   - Decrements on order failures (amount varies by `failureReason`)
+   - Increments on successful SMS delivery
+   - `consecutiveFailures` tracks back-to-back failures for auto-suspension
+   - Suspended numbers are excluded from `getNumber` allocation
+   - Quality snapshot captured in `numberSnapshot` at order creation time
+
+8. **SMS-Based Auto-Suspend**: Numbers receiving 0 SMS in the time window are auto-suspended with `suspensionReason: 'low_sms'`. Auto-recovers when SMS count rises above threshold.
 
 ## PHP Stubs API (`/var/www/html/stubs/`)
 
