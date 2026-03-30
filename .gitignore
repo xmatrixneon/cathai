@@ -12,6 +12,9 @@ out/
 .env.development
 .env*.local
 
+# Firebase service account (contains sensitive credentials)
+service-account-key.json
+
 
 # Logs
 logs/
