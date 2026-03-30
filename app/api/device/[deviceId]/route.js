@@ -1,7 +1,7 @@
 import connectDB from '@/lib/db';
 import Device from '@/models/Device';
 import Message from '@/models/Message';
-import { NextResponse } from 'next/response';
+import { NextResponse } from 'next/server';
 
 export async function GET(request, { params }) {
   try {
