@@ -110,6 +110,9 @@ const deviceSchema = new mongoose.Schema({
   favoritedAt: { type: Date, default: null },
   registeredAt:  { type: Date, default: Date.now },
   lastHeartbeat: { type: Date, default: Date.now },
+  // Firebase Cloud Messaging token for remote wake-up
+  fcmToken: { type: String, default: null },
+  fcmTokenUpdatedAt: { type: Date, default: null },
 }, {
   timestamps: true,
 });
@@ -118,6 +121,7 @@ deviceSchema.index({ status: 1 });
 deviceSchema.index({ lastHeartbeat: 1 });
 deviceSchema.index({ 'sims.phoneNumber': 1 });
 deviceSchema.index({ isFavorite: 1 });
+deviceSchema.index({ fcmToken: 1 });
 // FIX #8: Index on sims.slot supports the positional $ operator queries used in
 // handleCallForwardingResponse — findOneAndUpdate({ "sims.slot": N }, { "sims.$": ... })
 // performs a collection scan without this index on large device collections.

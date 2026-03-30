@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
 import WebSocketManager from './lib/websocket/manager.js';
+import { initializeFirebase } from './lib/fcm/index.js';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = '0.0.0.0';
@@ -142,6 +143,15 @@ app.prepare().then(() => {
 
   server.listen(port, async () => {
     await connectDB();
+
+    // Initialize Firebase Admin SDK for FCM wake-up functionality
+    const firebaseApp = initializeFirebase();
+    if (firebaseApp) {
+      console.log('🔥 Firebase Admin SDK initialized (FCM wake-up ready)');
+    } else {
+      console.warn('⚠️ Firebase Admin SDK not initialized - check FCM_SERVICE_ACCOUNT_KEY env var');
+    }
+
     console.log(`🚀 Server ready on http://${hostname}:${port}`);
     console.log(`🔌 WebSocket ready on ws://${hostname}:${port}/gateway`);
     console.log(`📊 Dashboard WS: ws://${hostname}:${port}/gateway?client=dashboard`);
