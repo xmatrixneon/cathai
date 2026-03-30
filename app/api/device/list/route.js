@@ -14,12 +14,15 @@ export async function GET(request) {
     const status = searchParams.get('status');
     const search = searchParams.get('search');
 
-    let query = {};
+    let query = { isActive: true };  // Only show active devices
     if (status && status !== 'all') query.status = status;
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { deviceId: { $regex: search, $options: 'i' } }
+      query.$and = [
+        { isActive: true },
+        { $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { deviceId: { $regex: search, $options: 'i' } }
+        ] }
       ];
     }
 
@@ -60,10 +63,11 @@ export async function GET(request) {
       };
     }));
 
-    // Stats
-    const online = await Device.countDocuments({ ...query, status: 'online' });
-    const offline = await Device.countDocuments({ ...query, status: 'offline' });
-    const error = await Device.countDocuments({ ...query, status: 'error' });
+    // Stats - only count active devices
+    const baseQuery = { isActive: true };
+    const online = await Device.countDocuments({ ...baseQuery, status: 'online' });
+    const offline = await Device.countDocuments({ ...baseQuery, status: 'offline' });
+    const error = await Device.countDocuments({ ...baseQuery, status: 'error' });
     const totalMessages = await Message.countDocuments({ time: { $gte: today } });
 
     return NextResponse.json({

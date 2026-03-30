@@ -40,18 +40,27 @@ interface SmsReceivedEvent {
   }
 }
 
-type WsEvent = DeviceStatusEvent | DeviceHeartbeatEvent | SmsReceivedEvent
+interface DeviceDeletedEvent {
+  type: 'device_deleted'
+  data: {
+    deviceId: string
+  }
+}
+
+type WsEvent = DeviceStatusEvent | DeviceHeartbeatEvent | SmsReceivedEvent | DeviceDeletedEvent
 
 interface UseDeviceWebSocketOptions {
   onDeviceStatusChange?: (data: DeviceStatusEvent['data']) => void
   onDeviceHeartbeat?: (data: DeviceHeartbeatEvent['data']) => void
   onSmsReceived?: (data: SmsReceivedEvent['data']) => void
+  onDeviceDeleted?: (data: DeviceDeletedEvent['data']) => void
 }
 
 export function useDeviceWebSocket({
   onDeviceStatusChange,
   onDeviceHeartbeat,
-  onSmsReceived
+  onSmsReceived,
+  onDeviceDeleted
 }: UseDeviceWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<NodeJS.Timeout | null>(null)
@@ -86,6 +95,9 @@ export function useDeviceWebSocket({
             case 'sms_received':
               onSmsReceived?.(message.data)
               break
+            case 'device_deleted':
+              onDeviceDeleted?.(message.data)
+              break
           }
         } catch (e) {
           console.error('Error parsing WebSocket message:', e)
@@ -105,7 +117,7 @@ export function useDeviceWebSocket({
       console.error('Failed to connect WebSocket:', error)
       reconnectTimer.current = setTimeout(connect, 3000)
     }
-  }, [onDeviceStatusChange, onDeviceHeartbeat, onSmsReceived])
+  }, [onDeviceStatusChange, onDeviceHeartbeat, onSmsReceived, onDeviceDeleted])
 
   useEffect(() => {
     connect()

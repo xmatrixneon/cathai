@@ -1,7 +1,7 @@
 import connectDB from '@/lib/db';
 import Device from '@/models/Device';
 import Message from '@/models/Message';
-import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/response';
 
 export async function GET(request, { params }) {
   try {
@@ -105,7 +105,12 @@ export async function DELETE(request, { params }) {
     await connectDB();
     const { deviceId } = await params;
 
-    const device = await Device.findOneAndDelete({ deviceId });
+    // Soft delete: set isActive to false instead of removing the document
+    const device = await Device.findOneAndUpdate(
+      { deviceId },
+      { $set: { isActive: false, status: 'offline' } },
+      { new: true }
+    );
     if (!device) {
       return NextResponse.json(
         { success: false, error: 'Device not found' },
@@ -113,7 +118,8 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    await Message.deleteMany({ 'metadata.deviceId': deviceId });
+    // Optionally delete associated messages (or keep them - your choice)
+    // Keeping them for now since device data is preserved
 
     return NextResponse.json({ success: true, message: 'Device deleted successfully' });
   } catch (error) {

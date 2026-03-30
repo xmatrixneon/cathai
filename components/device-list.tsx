@@ -243,6 +243,16 @@ export function DeviceList() {
               else toast.error(error || 'Failed to send SMS')
               break
             }
+
+            case 'device_deleted': {
+              const { deviceId } = msg.data
+              setDevices(prev => prev.filter(d => d.deviceId !== deviceId))
+              toast.info(`Device ${deviceId.slice(-6)} deleted`, { duration: 3000 })
+              // Refresh device list to update stats
+              if (fetchDevicesRef.current) clearTimeout(fetchDevicesRef.current)
+              fetchDevicesRef.current = setTimeout(() => fetchDevices(), 500)
+              break
+            }
           }
         } catch (e) {
           console.warn('WS parse error:', e)
