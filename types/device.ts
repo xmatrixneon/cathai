@@ -24,6 +24,7 @@ export interface Device {
   sims: DeviceSim[]
   recentMessages: number
   timeSinceLastSeen: { minutes: number; hours: number; days: number }
+  fcmToken?: string | null
 }
 
 export interface DeviceStats {

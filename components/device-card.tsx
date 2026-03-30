@@ -14,6 +14,7 @@ import {
   PhoneForwarded,
   PhoneOff,
   Send,
+  Power,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -38,6 +39,8 @@ interface DeviceCardProps {
     deviceId: string,
     simSlot: number,
   ) => void
+  onWakeUp?: (deviceId: string) => void
+  isWakingUp?: boolean
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -78,8 +81,10 @@ function formatTimeSince({ minutes, hours, days }: Device['timeSinceLastSeen']) 
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function DeviceCard({ device, onCallForwarding, onSendSms }: DeviceCardProps) {
+export function DeviceCard({ device, onCallForwarding, onSendSms, onWakeUp, isWakingUp }: DeviceCardProps) {
   const isOnline = device.status === 'online'
+  // Show wake-up button if device has FCM token (for both online and offline for testing)
+  const canWakeUp = device.fcmToken && onWakeUp
 
   return (
     <Card className="hover:shadow-md transition-shadow">
@@ -105,8 +110,8 @@ export function DeviceCard({ device, onCallForwarding, onSendSms }: DeviceCardPr
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-44">
-                {device.sims.map((sim) => (
-                  <React.Fragment key={sim.slot}>
+                {device.sims.map((sim, index) => (
+                  <React.Fragment key={`${device.deviceId}-dropdown-sim-${sim.slot}-${index}`}>
                     {sim.isActive && (
                       <DropdownMenuItem
                         onClick={() => onSendSms?.(device.deviceId, sim.slot - 1)}
@@ -138,6 +143,19 @@ export function DeviceCard({ device, onCallForwarding, onSendSms }: DeviceCardPr
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+
+          {canWakeUp && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs gap-1 flex-shrink-0"
+              onClick={() => onWakeUp(device.deviceId)}
+              disabled={isWakingUp}
+            >
+              <Power className={`h-3.5 w-3.5 ${isWakingUp ? 'animate-pulse' : ''}`} />
+              {isWakingUp ? 'Waking...' : 'Wake Up'}
+            </Button>
+          )}
         </div>
       </CardHeader>
 
@@ -160,9 +178,9 @@ export function DeviceCard({ device, onCallForwarding, onSendSms }: DeviceCardPr
         {device.sims.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">SIM cards</p>
-            {device.sims.map((sim) => (
+            {device.sims.map((sim, index) => (
               <div
-                key={sim.slot}
+                key={`${device.deviceId}-sim-${sim.slot}-${index}`}
                 className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-md border bg-muted/30"
               >
                 <div className="flex items-center gap-1.5 flex-wrap min-w-0">

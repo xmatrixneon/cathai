@@ -17,7 +17,7 @@ import {
 import { DeviceCard } from './device-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Smartphone, Search, Wifi, WifiOff, PhoneForwarded, PhoneOff, Send,
+  Smartphone, Search, Wifi, WifiOff, PhoneForwarded, PhoneOff, Send, Power,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Device, DeviceStats } from '@/types/device'
@@ -93,9 +93,13 @@ export function DeviceList() {
   const [smsPhoneNumber, setSmsPhoneNumber] = useState('')
   const [smsMessage, setSmsMessage] = useState('')
   const [smsSending, setSmsSending] = useState(false)
+  const [wakingUpDevice, setWakingUpDevice] = useState<string | null>(null)
+  const [wakingUpAll, setWakingUpAll] = useState(false)
 
   const wsRef           = useRef<WebSocket | null>(null)
   const reconnectTimer  = useRef<NodeJS.Timeout | null>(null)
+  const deviceStatusRef = useRef<Map<string, string>>(new Map()) // Track device statuses to detect changes
+  const fetchDevicesRef = useRef<NodeJS.Timeout | null>(null) // Debounce timer
 
   // ─── REST ──────────────────────────────────────────────────────────────────
 
@@ -154,8 +158,16 @@ export function DeviceList() {
           switch (msg.type) {
             case 'device_status': {
               const { deviceId, name, status, batteryLevel, isCharging, signalStrength, networkType, lastSeen } = msg.data
+              const previousStatus = deviceStatusRef.current.get(deviceId)
+              const statusChanged = previousStatus && previousStatus !== status
+
               setDevices(prev => {
-                if (!prev.find(d => d.deviceId === deviceId)) { fetchDevices(); return prev }
+                if (!prev.find(d => d.deviceId === deviceId)) {
+                  // New device, fetch with debounce
+                  if (fetchDevicesRef.current) clearTimeout(fetchDevicesRef.current)
+                  fetchDevicesRef.current = setTimeout(() => fetchDevices(), 500)
+                  return prev
+                }
                 return prev.map(d => d.deviceId !== deviceId ? d : {
                   ...d, status, lastSeen, timeSinceLastSeen: computeTimeSince(lastSeen),
                   ...(batteryLevel   != null && { batteryLevel }),
@@ -164,10 +176,17 @@ export function DeviceList() {
                   ...(networkType    != null && { networkType }),
                 })
               })
-              // FIX: Don't manually adjust stats.counts - let fetchDevices() fetch accurate stats from DB
-              // This fixes race condition where WebSocket and API polling conflict, causing counts to jump around
-              fetchDevices() // Refresh stats from DB to get accurate counts
-              toast[status === 'online' ? 'success' : 'warning'](`${name || deviceId} is now ${status}`, { duration: 3000 })
+
+              // Update tracked status
+              deviceStatusRef.current.set(deviceId, status)
+
+              // Only show toast and refresh when status actually changes
+              if (statusChanged) {
+                toast[status === 'online' ? 'success' : 'warning'](`${name || deviceId} is now ${status}`, { duration: 3000 })
+                // Debounced refresh to update stats
+                if (fetchDevicesRef.current) clearTimeout(fetchDevicesRef.current)
+                fetchDevicesRef.current = setTimeout(() => fetchDevices(), 500)
+              }
               break
             }
 
@@ -241,6 +260,7 @@ export function DeviceList() {
     connectWS()
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+      if (fetchDevicesRef.current) clearTimeout(fetchDevicesRef.current)
       wsRef.current?.close()
     }
   }, [connectWS])
@@ -356,6 +376,48 @@ export function DeviceList() {
     }
   }
 
+  const handleWakeUp = async (deviceId: string) => {
+    setWakingUpDevice(deviceId)
+    try {
+      const res = await fetch(`/api/device/${deviceId}/wake-up`, {
+        method: 'POST',
+      })
+      const result = await res.json()
+      if (result.success) {
+        toast.success(`Wake-up signal sent to ${devices.find(d => d.deviceId === deviceId)?.name || deviceId}`)
+        // Refresh devices after a delay to see if device comes online
+        setTimeout(() => fetchDevices(), 5000)
+      } else {
+        toast.error(result.error || 'Failed to send wake-up notification')
+      }
+    } catch {
+      toast.error('Error sending wake-up notification')
+    } finally {
+      setWakingUpDevice(null)
+    }
+  }
+
+  const handleWakeUpAll = async () => {
+    setWakingUpAll(true)
+    try {
+      const res = await fetch('/api/device/wake-up-all', {
+        method: 'POST',
+      })
+      const result = await res.json()
+      if (result.success) {
+        toast.success(result.message || `Wake-up sent to ${result.results?.sent || 0} device(s)`)
+        // Refresh devices after a delay to see if devices come online
+        setTimeout(() => fetchDevices(), 5000)
+      } else {
+        toast.error(result.error || 'Failed to send wake-up notifications')
+      }
+    } catch {
+      toast.error('Error sending wake-up notifications')
+    } finally {
+      setWakingUpAll(false)
+    }
+  }
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   if (loading && page === 1) return <LoadingSkeleton />
@@ -414,6 +476,16 @@ export function DeviceList() {
             <SelectItem value="status">Status</SelectItem>
           </SelectContent>
         </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 gap-1"
+          onClick={handleWakeUpAll}
+          disabled={wakingUpAll || (stats?.offline || 0) === 0}
+        >
+          <Power className={`h-3.5 w-3.5 ${wakingUpAll ? 'animate-pulse' : ''}`} />
+          {wakingUpAll ? 'Waking All...' : `Wake Up All (${stats?.offline || 0})`}
+        </Button>
       </div>
 
       {/* Grid */}
@@ -428,6 +500,8 @@ export function DeviceList() {
               onDelete={(d) => { setSelectedDevice(d); setDeleteDialogOpen(true) }}
               onCallForwarding={handleCallForwarding}
               onSendSms={handleSendSms}
+              onWakeUp={handleWakeUp}
+              isWakingUp={wakingUpDevice === device.deviceId}
             />
           ))}
         </div>
