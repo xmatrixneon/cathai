@@ -16,8 +16,11 @@ import mongoose from "mongoose";
 import cron from "node-cron";
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { initializeApp, getApps, getApp } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
+import { cert } from 'firebase-admin/app';
+import { readFileSync } from 'fs';
 import Device from "../models/Device.js";
-import { sendWakeUpNotification } from "../lib/fcm/send.js";
 
 // Get directory path for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +34,36 @@ const MONGO_URI = process.env.MONGODB_URI;
 
 // Configuration from environment
 const WAKE_UP_INTERVAL = process.env.FCM_WAKE_UP_CRON || "*/2 * * * * *"; // Every 2 minutes default
+
+/**
+ * Initialize Firebase Admin SDK
+ */
+let firebaseApp = null;
+
+function getFirebaseApp() {
+  if (firebaseApp) return firebaseApp;
+
+  const apps = getApps();
+  if (apps.length > 0) {
+    firebaseApp = apps[0];
+    return firebaseApp;
+  }
+
+  const serviceAccountPath = process.env.FCM_SERVICE_ACCOUNT_KEY;
+  if (!serviceAccountPath) {
+    console.warn('[FCM] FCM_SERVICE_ACCOUNT_KEY not set - wake-up disabled');
+    return null;
+  }
+
+  try {
+    const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
+    firebaseApp = initializeApp({ credential: cert(serviceAccount) });
+    return firebaseApp;
+  } catch (error) {
+    console.error('[FCM] Failed to initialize Firebase:', error.message);
+    return null;
+  }
+}
 const OFFLINE_THRESHOLD_SECONDS = parseInt(process.env.FCM_WAKE_UP_OFFLINE_THRESHOLD || "120"); // 2 minutes default
 const MAX_WAKE_UP_ATTEMPTS = parseInt(process.env.FCM_WAKE_UP_MAX_ATTEMPTS || "3"); // Max attempts per cycle
 const WAKE_UP_COOLDOWN_MINUTES = parseInt(process.env.FCM_WAKE_UP_COOLDOWN || "5"); // Cooldown between attempts
@@ -138,6 +171,7 @@ async function wakeUpOfflineDevices() {
     let successCount = 0;
     let skipCount = 0;
     let failCount = 0;
+    let staleTokenCount = 0;
 
     for (const device of offlineDevices) {
       const offlineDuration = Math.floor((Date.now() - new Date(device.lastHeartbeat).getTime()) / 1000);
@@ -155,15 +189,23 @@ async function wakeUpOfflineDevices() {
 
       console.log(`📡 WAKE-UP  ${device.deviceId} (${device.name || 'unnamed'})`);
       console.log(`    Offline for: ${offlineMinutes}m ${offlineDuration % 60}s ago`);
-      console.log(`    FCM Token: ${device.fcmToken ? device.fcmToken.substring(0, 20) + '...' : 'none'}`);
 
-      // Send FCM wake-up notification
-      const success = await sendWakeUpNotification(device.deviceId, device.fcmToken);
+      // Send FCM wake-up notification and get detailed result
+      const result = await sendWakeUpNotificationWithResult(device.deviceId, device.fcmToken);
 
-      if (success) {
+      if (result.success) {
         recordWakeUpAttempt(device.deviceId);
         successCount++;
         console.log(`    ✅ Wake-up sent successfully`);
+      } else if (result.isStaleToken) {
+        // Silently skip devices with stale tokens (old devices without FCM support)
+        staleTokenCount++;
+        // Mark device as having no valid FCM token
+        await Device.updateOne(
+          { deviceId: device.deviceId },
+          { $unset: { fcmToken: "", fcmTokenUpdatedAt: "" } }
+        );
+        console.log(`    ⚠️  Stale FCM token removed (old device without FCM)`);
       } else {
         failCount++;
         console.log(`    ❌ Failed to send wake-up`);
@@ -178,12 +220,53 @@ async function wakeUpOfflineDevices() {
     console.log(`📊 SUMMARY  (${elapsed}ms)`);
     console.log(`   ✅ Success: ${successCount} device(s) woken`);
     console.log(`   ⏭️  Skipped: ${skipCount} device(s) (cooldown/limit)`);
+    console.log(`   ⚠️  Stale tokens removed: ${staleTokenCount} device(s)`);
     console.log(`   ❌ Failed:  ${failCount} device(s)`);
     console.log(`${'═'.repeat(60)}\n`);
 
   } catch (err) {
     console.error(`❌ WAKE-UP ERROR: ${err.message}`);
     console.error(`   ${err.stack}\n`);
+  }
+}
+
+/**
+ * Send wake-up notification with detailed result
+ * Returns { success: boolean, isStaleToken: boolean }
+ */
+async function sendWakeUpNotificationWithResult(deviceId, fcmToken) {
+  if (!fcmToken) {
+    return { success: false, isStaleToken: false };
+  }
+
+  const firebaseApp = getFirebaseApp();
+  if (!firebaseApp) {
+    return { success: false, isStaleToken: false };
+  }
+
+  try {
+    const message = {
+      token: fcmToken,
+      data: {
+        type: 'wakeup',
+        server_timestamp: new Date().toISOString()
+      },
+      android: {
+        priority: 'high',
+        ttl: 0
+      },
+    };
+
+    await getMessaging(firebaseApp).send(message);
+    console.log(`    FCM Token: ${fcmToken.substring(0, 20)}...`);
+    return { success: true, isStaleToken: false };
+
+  } catch (error) {
+    // Check if token is unregistered
+    if (error.code === 'messaging/registration-token-not-registered') {
+      return { success: false, isStaleToken: true };
+    }
+    return { success: false, isStaleToken: false };
   }
 }
 
@@ -215,6 +298,14 @@ async function initialize() {
 
   await mongoose.connect(MONGO_URI);
   console.log(`✅ MongoDB connected`);
+
+  // Initialize Firebase
+  const fbApp = getFirebaseApp();
+  if (!fbApp) {
+    console.warn(`⚠️  FCM not initialized - wake-up will be skipped`);
+  } else {
+    console.log(`✅ Firebase initialized`);
+  }
 
   // Log configuration
   console.log(`\n⚙️  Configuration:`);

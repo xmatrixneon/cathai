@@ -31,10 +31,11 @@ export async function GET(request) {
         startDate.setDate(now.getDate() - 1);
     }
 
-    // Get device stats
-    const totalDevices = await Device.countDocuments();
-    const onlineDevices = await Device.countDocuments({ status: 'online' });
-    const offlineDevices = await Device.countDocuments({ status: 'offline' });
+    // Get device stats - only count active devices
+    const baseQuery = { isActive: true };
+    const totalDevices = await Device.countDocuments(baseQuery);
+    const onlineDevices = await Device.countDocuments({ ...baseQuery, status: 'online' });
+    const offlineDevices = await Device.countDocuments({ ...baseQuery, status: 'offline' });
     const activeDevices = await Device.countDocuments({
       lastSeen: { $gte: startDate }
     });

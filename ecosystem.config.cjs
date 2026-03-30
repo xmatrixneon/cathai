@@ -17,5 +17,8 @@ module.exports = {
       SMS_SUSPEND_THRESHOLD: '0',
       SMS_SUSPEND_WINDOW_HOURS: '12'
     }
+  }, {
+    name: 'manager:wakeup',
+    script: 'script/wakeup.mjs'
   }]
 };

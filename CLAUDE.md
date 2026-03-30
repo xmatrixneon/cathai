@@ -27,6 +27,14 @@ PHP-based SMS activation API that provides external interface for requesting pho
 - Number allocation with smart cooldown (5-20 minutes randomized)
 - OTP extraction using service-specific regex patterns
 
+### 3. Mobile App
+React Native (Expo) application that connects to the manager via WebSocket and REST API. Has its own authentication system separate from the web admin panel.
+
+**Key components:**
+- Uses `/api/mobile/login` for authentication (separate from web `/api/login`)
+- Scopes-based permission system for device access control
+- Can trigger device wake-up via FCM notifications
+
 ## Development Commands
 
 ```bash
@@ -47,6 +55,12 @@ pm2 logs manager                      # View main app logs
 pm2 logs manager:numberstatus        # View status sync logs
 pm2 logs manager:fetchsms            # View SMS fetch logs
 pm2 logs manager:suspendlowsms       # View SMS suspend monitor logs
+
+# FCM Wake-Up Service (run separately)
+pm2 start script/wakeup.mjs --name "manager:wakeup"
+
+# Create Mobile App User
+node script/create-mobile-user.mjs <email> <password> <name>
 ```
 
 ## PM2 Apps
@@ -127,6 +141,31 @@ Runs as PM2 process `manager:suspendlowsms`:
 - `SMS_SUSPEND_DRY_RUN` - Test mode without actual changes
 - `SMS_TEST_NUMBER` - Single number testing
 
+### FCM Wake-Up Service (`script/wakeup.mjs`)
+
+Runs independently (not in PM2 config) to automatically wake up offline devices:
+
+**Behavior:**
+- Scans for devices offline beyond threshold (default: 120 seconds)
+- Sends FCM high-priority notifications to devices with valid FCM tokens
+- Tracks wake-up attempts with cooldown period (default: 5 minutes)
+- Limits attempts per cycle (default: 3) to avoid spamming
+- Cleans up old attempt records hourly
+
+**API endpoints:**
+- `POST /api/device/:deviceId/wake-up` - Manually trigger wake-up for single device
+- `POST /api/device/wake-up-all` - Trigger wake-up for all offline devices
+
+**Configuration via env vars:**
+- `FCM_SERVICE_ACCOUNT_KEY` - Path to Firebase service account key JSON file
+- `FCM_WAKE_UP_CRON` - Scan interval (default: `*/2 * * * * *` = every 2 minutes)
+- `FCM_WAKE_UP_OFFLINE_THRESHOLD` - Offline seconds before wake-up (default: 120)
+- `FCM_WAKE_UP_MAX_ATTEMPTS` - Max attempts per cycle (default: 3)
+- `FCM_WAKE_UP_COOLDOWN` - Cooldown minutes between attempts (default: 5)
+
+**Device model additions:**
+- `fcmToken` - Firebase Cloud Messaging token for wake-up notifications
+
 ### Number Quality Management API
 
 **`/api/numbers/quality`** - Quality tracking and bulk operations
@@ -177,14 +216,25 @@ DELETE - Soft delete (set `active: false`)
 - **Quality impact**: `qualityImpact` (affects parent number's quality score)
 - **Snapshot**: `numberSnapshot` captures number state at order time
 
+**MobileUser** (`models/MobileUser.js`):
+- `email` (unique) - Login email for mobile app
+- `password` - Hashed password (bcrypt)
+- `name` - Display name
+- `allowedDevices[]` - Restrict access to specific device IDs (empty = all devices)
+- `scopes[]` - Permission scopes: 'devices:read', 'messages:read', 'sms:send', 'call:manage', 'ws:connect'
+- `isActive` - Account active flag
+- `lastLoginAt` - Last successful login timestamp
+
 ### API Routes Structure
 
-- `/api/device/*` - Device CRUD, list, stats, send SMS, call forwarding
+- `/api/device/*` - Device CRUD, list, stats, send SMS, call forwarding, wake-up
 - `/api/numbers/*` - Number management, quality tracking, bulk operations
 - `/api/messages/*` - Message retrieval
 - `/api/overview/*` - Dashboard statistics, activations, charts
 - `/api/countries/*`, `/api/services/*` - Reference data
 - `/api/locks/*` - Number lock/unlock management
+- `/api/mobile/*` - Mobile app authentication (separate from web admin panel)
+- `/api/login`, `/api/register` - Web admin panel authentication
 
 ## Environment Variables
 
@@ -196,6 +246,14 @@ Optional:
 - `PORT` - Server port (default: 3000)
 - `DEVICE_AUTO_DELETE_ENABLED` - Enable auto-delete (default: true)
 - `DEVICE_AUTO_DELETE_HOURS` - Offline hours before deletion (default: 24)
+- `MOBILE_API_KEY` - API key for mobile app (optional but recommended)
+
+**FCM Wake-Up (script/wakeup.mjs):**
+- `FCM_SERVICE_ACCOUNT_KEY` - Path to Firebase service account key JSON file (required for wake-up)
+- `FCM_WAKE_UP_CRON` - Scan interval cron format (default: `*/2 * * * * *` = every 2 min)
+- `FCM_WAKE_UP_OFFLINE_THRESHOLD` - Offline seconds before wake-up (default: 120)
+- `FCM_WAKE_UP_MAX_ATTEMPTS` - Max attempts per cycle (default: 3)
+- `FCM_WAKE_UP_COOLDOWN` - Cooldown minutes between attempts (default: 5)
 
 **SMS Auto-Suspend (script/suspend-low-sms.mjs):**
 - `SMS_AUTO_SUSPEND_ENABLED` - Enable SMS-based auto-suspend (default: true)
@@ -233,6 +291,17 @@ Optional:
    - Quality snapshot captured in `numberSnapshot` at order creation time
 
 8. **SMS-Based Auto-Suspend**: Numbers receiving 0 SMS in the time window are auto-suspended with `suspensionReason: 'low_sms'`. Auto-recovers when SMS count rises above threshold.
+
+9. **Dual Authentication Systems**: The system has two separate authentication systems:
+   - Web admin panel: Uses `/api/login` and `/api/register` with `User` model
+   - Mobile app: Uses `/api/mobile/login` with `MobileUser` model and scopes-based permissions
+   - Mobile users created with `script/create-mobile-user.mjs` cannot log in to web panel
+
+10. **FCM Wake-Up Integration**: Devices can register FCM tokens for remote wake-up when they go offline. The wake-up service (`script/wakeup.mjs`) automatically scans for offline devices and sends high-priority notifications. Devices must have valid `fcmToken` stored in the `Device` model.
+
+11. **PM2 Service Management**: **NEVER automatically restart PM2 services** after making code changes. The user controls when to restart/reload services. Only report changes made and let user decide when to apply them. Do not use `pm2 restart`, `pm2 reload`, or similar commands without explicit user request.
+
+12. **Production Environment**: This application is running in production mode (`NODE_ENV=production`) via PM2. All code changes require manual PM2 restart by the user.
 
 ## PHP Stubs API (`/var/www/html/stubs/`)
 

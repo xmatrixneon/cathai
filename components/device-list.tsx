@@ -24,6 +24,22 @@ import type { Device, DeviceStats } from '@/types/device'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+function deviceMatchesFilters(device: Device, searchTerm: string, statusFilter: string): boolean {
+  // Check status filter
+  if (statusFilter && statusFilter !== 'all' && device.status !== statusFilter) {
+    return false
+  }
+  // Check search term
+  if (searchTerm && searchTerm.trim()) {
+    const search = searchTerm.toLowerCase()
+    return (
+      device.name?.toLowerCase().includes(search) ||
+      device.deviceId?.toLowerCase().includes(search)
+    )
+  }
+  return true
+}
+
 function computeTimeSince(lastSeen: string) {
   const diffMs   = Date.now() - new Date(lastSeen).getTime()
   const diffMins = Math.floor(diffMs / 60_000)
@@ -71,6 +87,8 @@ export function DeviceList() {
   const [devices, setDevices]         = useState<Device[]>([])
   const [stats, setStats]             = useState<DeviceStats | null>(null)
   const [loading, setLoading]         = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [searchLoading, setSearchLoading] = useState(false)
   const [searchTerm, setSearchTerm]   = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortBy, setSortBy]           = useState('lastSeen')
@@ -103,9 +121,9 @@ export function DeviceList() {
 
   // ─── REST ──────────────────────────────────────────────────────────────────
 
-  const fetchDevices = useCallback(async () => {
+  const fetchDevices = useCallback(async (showLoading = false) => {
     try {
-      setLoading(true)
+      if (showLoading) setLoading(true)
       const params = new URLSearchParams({
         page: page.toString(), limit: '20', sortBy, sortOrder: 'desc',
         ...(statusFilter !== 'all' && { status: statusFilter }),
@@ -117,13 +135,15 @@ export function DeviceList() {
         setDevices(result.data.devices)
         setStats(result.data.stats)
         setTotalPages(result.data.pagination.pages)
+        // Clear search loading when fetch completes
+        setSearchLoading(false)
       } else {
         toast.error('Failed to fetch devices')
       }
     } catch {
       toast.error('Error fetching devices')
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }, [page, statusFilter, sortBy, searchTerm])
 
@@ -162,12 +182,18 @@ export function DeviceList() {
               const statusChanged = previousStatus && previousStatus !== status
 
               setDevices(prev => {
-                if (!prev.find(d => d.deviceId === deviceId)) {
-                  // New device, fetch with debounce
-                  if (fetchDevicesRef.current) clearTimeout(fetchDevicesRef.current)
-                  fetchDevicesRef.current = setTimeout(() => fetchDevices(), 500)
+                const existingDevice = prev.find(d => d.deviceId === deviceId)
+                if (!existingDevice) {
+                  // Only add new device if it matches current filters
+                  const tempDevice = { deviceId, name: name || deviceId, status, lastSeen } as Device
+                  if (deviceMatchesFilters(tempDevice, searchTerm, statusFilter)) {
+                    // Fetch full device list with debounce
+                    if (fetchDevicesRef.current) clearTimeout(fetchDevicesRef.current)
+                    fetchDevicesRef.current = setTimeout(() => fetchDevices(false), 500)
+                  }
                   return prev
                 }
+                // Update existing device
                 return prev.map(d => d.deviceId !== deviceId ? d : {
                   ...d, status, lastSeen, timeSinceLastSeen: computeTimeSince(lastSeen),
                   ...(batteryLevel   != null && { batteryLevel }),
@@ -183,34 +209,39 @@ export function DeviceList() {
               // Only show toast and refresh when status actually changes
               if (statusChanged) {
                 toast[status === 'online' ? 'success' : 'warning'](`${name || deviceId} is now ${status}`, { duration: 3000 })
-                // Debounced refresh to update stats
+                // Debounced refresh to update stats (no loading)
                 if (fetchDevicesRef.current) clearTimeout(fetchDevicesRef.current)
-                fetchDevicesRef.current = setTimeout(() => fetchDevices(), 500)
+                fetchDevicesRef.current = setTimeout(() => fetchDevices(false), 500)
               }
               break
             }
 
             case 'device_heartbeat': {
               const { deviceId, batteryLevel, isCharging, signalStrength, networkType, sims, lastSeen } = msg.data
-              setDevices(prev => prev.map(d => d.deviceId !== deviceId ? d : {
-                ...d, batteryLevel, isCharging, signalStrength, networkType, lastSeen,
-                timeSinceLastSeen: computeTimeSince(lastSeen),
-                ...(sims && {
-                  sims: d.sims.map(existing => {
-                    const updated = sims.find((s: { slot: number }) => s.slot === existing.slot)
-                    if (!updated) return existing
-                    return {
-                      ...existing,
-                      carrier:       updated.carrier       ?? existing.carrier,
-                      signalStrength: updated.signalStrength ?? existing.signalStrength,
-                      networkType:   updated.networkType   ?? existing.networkType,
-                      isActive:      updated.isActive      ?? existing.isActive,
-                      callForwardingActive: existing.callForwardingActive,
-                      callForwardingTo:     existing.callForwardingTo,
-                    }
+              setDevices(prev => {
+                const existingDevice = prev.find(d => d.deviceId === deviceId)
+                // Only update if device is already in the list (don't add new devices from heartbeat)
+                if (!existingDevice) return prev
+                return prev.map(d => d.deviceId !== deviceId ? d : {
+                  ...d, batteryLevel, isCharging, signalStrength, networkType, lastSeen,
+                  timeSinceLastSeen: computeTimeSince(lastSeen),
+                  ...(sims && {
+                    sims: d.sims.map(existing => {
+                      const updated = sims.find((s: { slot: number }) => s.slot === existing.slot)
+                      if (!updated) return existing
+                      return {
+                        ...existing,
+                        carrier:       updated.carrier       ?? existing.carrier,
+                        signalStrength: updated.signalStrength ?? existing.signalStrength,
+                        networkType:   updated.networkType   ?? existing.networkType,
+                        isActive:      updated.isActive      ?? existing.isActive,
+                        callForwardingActive: existing.callForwardingActive,
+                        callForwardingTo:     existing.callForwardingTo,
+                      }
+                    }),
                   }),
-                }),
-              }))
+                })
+              })
               break
             }
 
@@ -248,9 +279,9 @@ export function DeviceList() {
               const { deviceId } = msg.data
               setDevices(prev => prev.filter(d => d.deviceId !== deviceId))
               toast.info(`Device ${deviceId.slice(-6)} deleted`, { duration: 3000 })
-              // Refresh device list to update stats
+              // Refresh device list to update stats (no loading)
               if (fetchDevicesRef.current) clearTimeout(fetchDevicesRef.current)
-              fetchDevicesRef.current = setTimeout(() => fetchDevices(), 500)
+              fetchDevicesRef.current = setTimeout(() => fetchDevices(false), 500)
               break
             }
           }
@@ -275,7 +306,25 @@ export function DeviceList() {
     }
   }, [connectWS])
 
-  useEffect(() => { fetchDevices() }, [fetchDevices])
+  useEffect(() => {
+    // Initial load with loading state
+    fetchDevices(true).then(() => setInitialLoading(false))
+    // Subsequent fetches (from dependencies) won't show loading
+  }, [fetchDevices])
+
+  // ─── Debounced Search Handler ────────────────────────────────────────
+
+  const handleSearchChange = (value: string) => {
+    const trimmedValue = value.trim()
+    setSearchTerm(value)
+    setPage(1) // Reset to page 1 when searching
+    // Show loading when searching with actual term, clear when empty
+    if (trimmedValue) {
+      setSearchLoading(true)
+    } else {
+      setSearchLoading(false)
+    }
+  }
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
 
@@ -377,7 +426,7 @@ export function DeviceList() {
         toast.success('Device deleted')
         setDeleteDialogOpen(false)
         setSelectedDevice(null)
-        fetchDevices()
+        fetchDevices(false)
       } else {
         toast.error(result.error || 'Failed to delete device')
       }
@@ -395,8 +444,8 @@ export function DeviceList() {
       const result = await res.json()
       if (result.success) {
         toast.success(`Wake-up signal sent to ${devices.find(d => d.deviceId === deviceId)?.name || deviceId}`)
-        // Refresh devices after a delay to see if device comes online
-        setTimeout(() => fetchDevices(), 5000)
+        // Refresh devices after a delay to see if device comes online (no loading)
+        setTimeout(() => fetchDevices(false), 5000)
       } else {
         toast.error(result.error || 'Failed to send wake-up notification')
       }
@@ -416,8 +465,8 @@ export function DeviceList() {
       const result = await res.json()
       if (result.success) {
         toast.success(result.message || `Wake-up sent to ${result.results?.sent || 0} device(s)`)
-        // Refresh devices after a delay to see if devices come online
-        setTimeout(() => fetchDevices(), 5000)
+        // Refresh devices after a delay to see if devices come online (no loading)
+        setTimeout(() => fetchDevices(false), 5000)
       } else {
         toast.error(result.error || 'Failed to send wake-up notifications')
       }
@@ -430,7 +479,7 @@ export function DeviceList() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  if (loading && page === 1) return <LoadingSkeleton />
+  if (initialLoading && page === 1) return <LoadingSkeleton />
 
   const STAT_CARDS = stats ? [
     { label: 'Total',   value: stats.total,   icon: <Smartphone className="h-3.5 w-3.5 text-muted-foreground" /> },
@@ -465,7 +514,7 @@ export function DeviceList() {
           <Input
             placeholder="Search devices…"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-9 h-9"
           />
         </div>
@@ -499,7 +548,9 @@ export function DeviceList() {
       </div>
 
       {/* Grid */}
-      {devices.length === 0 && !loading ? (
+      {searchLoading ? (
+        <div className="py-16 text-center text-sm text-muted-foreground">Searching...</div>
+      ) : devices.length === 0 && !loading && !initialLoading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">No devices found.</div>
       ) : (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">

@@ -19,11 +19,14 @@ export async function GET(request) {
     if (search) {
       query.$and = [
         { isActive: true },
+        ...(status && status !== 'all' ? [{ status }] : []),
         { $or: [
           { name: { $regex: search, $options: 'i' } },
           { deviceId: { $regex: search, $options: 'i' } }
-        ] }
+        ]}
       ];
+      // Remove status from top level since it's now in $and
+      delete query.status;
     }
 
     const total = await Device.countDocuments(query);
