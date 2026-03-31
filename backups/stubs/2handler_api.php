@@ -11,7 +11,7 @@ use MongoDB\Model\BSONArray;
 
 function getMongoDBConnection($database = 'smsgateway') {
     try {
-        $mongoClient = new Client("mongodb://localhost:27017/$database");
+        $mongoClient = new Client("mongodb://smsgateway:Trainman%40843411@localhost:27017/$database?authSource=smsgateway");
         return $mongoClient->$database;
     } catch (Exception $e) {
         die("Error connecting to MongoDB: " . $e->getMessage());

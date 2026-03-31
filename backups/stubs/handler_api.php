@@ -11,7 +11,7 @@ use MongoDB\Model\BSONArray;
 
 function getMongoDBConnection($database = 'smsgateway') {
     try {
-        $mongoClient = new Client("mongodb://localhost:27017/$database");
+        $mongoClient = new Client("mongodb://smsgateway:Trainman%40843411@localhost:27017/$database?authSource=smsgateway");
         return $mongoClient->$database;
     } catch (Exception $e) {
         die("Error connecting to MongoDB: " . $e->getMessage());
@@ -58,7 +58,7 @@ function buynumber($request) {
 
         for ($i = 0; $i < $maxTries; $i++) {
             $availableNumbers = $db->numbers->aggregate([
-                ['$match' => ['active' => true, 'countryid' => $countrydata->_id]],
+                ['$match' => ['active' => true, 'countryid' => $countrydata->_id, 'suspended' => false]],
                 ['$sample' => ['size' => 1]]
             ])->toArray();
 
@@ -274,7 +274,7 @@ function setcancel($request){
                     }
             $updatedOrder = $db->orders->findOneAndUpdate(
                 ['_id' => $order['_id'], 'active' => true, 'isused' => false],
-                ['$set' => ['active' => false]],
+                ['$set' => ['active' => false, 'failureReason' => 'user_cancelled', 'qualityImpact' => 0]],
                 ['new' => true]
             );
             return "ACCESS_CANCEL";

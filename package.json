@@ -7,7 +7,8 @@
     "build": "next build",
     "dev": "node server.js",
     "lint": "next lint",
-    "start": "NODE_ENV=production node server.js"
+    "start": "NODE_ENV=production node server.js",
+    "backup": "node script/backup.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
