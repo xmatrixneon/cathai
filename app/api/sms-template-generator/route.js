@@ -51,7 +51,8 @@ function buildSmartOtpRegexList(formats) {
 }
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY,
+  baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
 });
 
 export async function POST(request) {
@@ -165,7 +166,7 @@ Return ONLY the template string, nothing else.
 `;
 
       const completion = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "deepseek-chat",
         messages: [
           {
             role: "system",
@@ -177,7 +178,7 @@ Return ONLY the template string, nothing else.
           }
         ],
         max_tokens: 1000,
-        temperature: 0.1,
+        temperature: 1,
       });
 
       template = completion.choices[0]?.message?.content?.trim();
