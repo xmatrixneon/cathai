@@ -15,4 +15,8 @@ const MessageSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+// Indexes for faster message queries in fetch script
+MessageSchema.index({ receiver: 1, createdAt: -1 });
+MessageSchema.index({ createdAt: -1 });
+
 export default mongoose.models.Message || mongoose.model('Message', MessageSchema);

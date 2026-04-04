@@ -91,8 +91,8 @@ mongoose
 // Prevent overlapping runs
 let running = false;
 
-// Cron every 5 sec
-cron.schedule("*/5 * * * * *", async () => {
+// Cron every 2 sec
+cron.schedule("*/2 * * * * *", async () => {
   if (running) {
     console.log("⏭ Previous run still in progress — skipping this tick");
     return;

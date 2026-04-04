@@ -20,5 +20,14 @@ module.exports = {
   }, {
     name: 'manager:wakeup',
     script: 'script/wakeup.mjs'
+  }, {
+    name: 'manager:cleanup-messages',
+    script: 'script/cleanup-messages.mjs',
+    env: {
+      MESSAGE_CLEANUP_ENABLED: 'true',
+      MESSAGE_RETENTION_HOURS: '12',
+      MESSAGE_CLEANUP_DRY_RUN: 'false',
+      MESSAGE_CLEANUP_BATCH_SIZE: '1000'
+    }
   }]
 };
