@@ -188,17 +188,15 @@ if (order.maxmessage !== 0 && messageLength >= order.maxmessage) {
       // Build regex list from templates
       const otpRegexList = buildSmartOtpRegexList(order.formate);
 
-// ✅ Base time = updatedAt ya createdAt
-const baseTime = order.updatedAt || order.createdAt;
+// ✅ Base time = order createdAt (never changes, unlike updatedAt)
+const baseTime = order.createdAt;
 
 // ✅ Look back 3 minutes to catch any delayed messages
 const sinceTime = new Date(baseTime.getTime() - 180000);
 
-// ✅ Sirf uske baad ke messages uthao
+// ✅ Sirf uske baad ke messages uthao (use 'time' field for SMS timestamp)
 const timeFilter = {
-  $or: [
-    { createdAt: { $gt: sinceTime } },
-  ],
+  time: { $gt: sinceTime },
 };
 
 

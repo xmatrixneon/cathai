@@ -65,7 +65,7 @@ export default function ActiveOrdersPage() {
 
   useEffect(() => {
     fetchOrders()
-    const interval = setInterval(fetchOrders, 20000) // Auto-refresh every 20s
+    const interval = setInterval(fetchOrders, 5000) // Auto-refresh every 5s
     return () => clearInterval(interval)
   }, [])
 
@@ -101,7 +101,7 @@ export default function ActiveOrdersPage() {
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle>Orders Overview</CardTitle>
           <Badge variant="outline" className="text-xs">
-            Auto-refreshing every 20s
+            Auto-refreshing every 5s
           </Badge>
         </CardHeader>
         <CardContent>
