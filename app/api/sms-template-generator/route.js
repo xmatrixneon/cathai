@@ -162,114 +162,45 @@ export async function POST(request) {
     do {
       attempts++;
 
+      // Restructured prompt: Examples first (DeepSeek needs this pattern), then rules
       const prompt = `
-You are an expert SMS template generator. Convert the following SMS message into a template using specific placeholder rules. The template MUST be compatible with our regex builder system and MUST successfully extract the OTP from the SMS.
+Convert SMS to templates by replacing OTP with {otp}.
 
-=== CRITICAL RULES ===
-1. You MUST use exactly ONE {otp} placeholder in the entire template
-2. Replace ONLY the actual OTP CODE/NUMBER with {otp} - NOT the word "OTP" when it appears as text
-3. The word "OTP", "code", "password" in the message text should be preserved as-is
-4. If the actual OTP number appears multiple times, use {any} for subsequent occurrences
-5. Match the SMS structure EXACTLY - preserve all punctuation, spacing, and static text
-6. IMPORTANT: Unusual suffixes like "-----ORGEN", random codes, or sender signatures at the end should be replaced with {any}
+EXAMPLES:
+"Your verification code is 123456. Valid for 10 minutes." → "Your verification code is {otp}. Valid for {time}."
+"Dear customer, 5672 is the one Time Password from Vi. Expires in 3 min. OTP @www.myvi.in #5672" → "Dear customer, {otp} is the one Time Password from Vi. Expires in {time}. OTP @{url} #{any}"
+"341722 is your One time password (OTP) to login to MyJio. Don't share OTP with anyone." → "{otp} is your One time password (OTP) to login to MyJio. Don't share OTP with anyone."
+"<#> 1770 is your OTP for Amazon login. Valid for 5 mins. Ref: ABC123XYZ" → "<#> {otp} is your OTP for Amazon login. Valid for {time}. Ref: {id}"
+"Your access code is AB92X1. This code expires in 15 minutes." → "Your access code is {otp}. This code expires in {time}."
+"OTP to authorize txn of $50.00 at STORE is 789456. Transaction ID: TXN123456789" → "OTP to authorize txn of {amount} at STORE is {otp}. Transaction ID: {id}"
+"Verify your account: 456789 is your code. Visit https://example.com/verify" → "Verify your account: {otp} is your code. Visit {url}"
+"Your Uber OTP is 2847. Request for ride to 123 Main St. Trip ID: 4567890123" → "Your Uber OTP is {otp}. Request for ride to {number} {id}. Trip ID: {id}"
+"471154 is your OTP for login/signup. Valid for 5 mins. -----ORGEN" → "{otp} is your OTP for login/signup. Valid for {time}. {any}"
+"<#> 1770 is your OTP to login into Airtel Thanks app. Valid for 100 secs. N9BWuqauU1y" → "<#> {otp} is your OTP to login into Airtel Thanks app. Valid for {time}. {any}"
+"Use 892341 to verify your phone number on WhatsApp. Don't share this code." → "Use {otp} to verify your phone number on WhatsApp. Don't share this code."
+"Your Paytm OTP is 4523 for transaction of Rs.100. Valid till 5:30 PM." → "Your Paytm OTP is {otp} for transaction of {amount}. Valid till {time}."
+"G-452912 is your Google verification code." → "{otp} is your Google verification code."
+"Your Login OTP is 7812. Do not share with anyone. Call 1800-123-4567 for help." → "Your Login OTP is {otp}. Do not share with anyone. Call {phone} for help."
+"Enter 6234 to confirm your account. Expires in 30 minutes." → "Enter {otp} to confirm your account. Expires in {time}."
+"Authorise transaction of $99.50 with OTP 87321. Bank of America." → "Authorise transaction of {amount} with OTP {otp}. {any}"
+"Your Zomato OTP: 291038. Valid for 10 min. Happy ordering!" → "Your Zomato OTP: {otp}. Valid for {time}. {any}"
+"[Facebook] 123456 is your reset code. Don't share. If not you, visit fb.me/help" → "{any} {otp} is your reset code. Don't share. If not you, visit {url}"
+"Swiggy: Use 5678 as OTP to complete your order. Total: Rs.299" → "{any}: Use {otp} as OTP to complete your order. Total: {amount}"
+"Your Netflix code is ABC-123. Enter at netflix.com/activate" → "Your Netflix code is {otp}. Enter at {url}"
+"OTP 9123 for PhonePe transaction. Call +91-9876543210 if not you." → "OTP {otp} for {any} transaction. Call {phone} if not you."
+"Your Instagram code is 873-456. Don't share. Account: @johnny" → "Your Instagram code is {otp}. Don't share. Account: {any}"
 
-=== PLACEHOLDERS AVAILABLE ===
-Primary:
-- {otp} → Use ONLY for the actual OTP code/number (alphanumeric, 3-20 chars) - REQUIRED (use exactly once)
+RULES:
+1. Replace ONLY the OTP code with {otp} (NOT the word "OTP" itself)
+2. Use exactly ONE {otp} per template
+3. Preserve all text, punctuation, spacing exactly
+4. Use placeholders: {otp} {time} {url} {any} {id} {digits} {phone} {email} {name} {amount} {number} {date} {random}
 
-For dynamic content:
-- {digits} → Pure numbers only (phone numbers, numeric codes)
-- {random} → Alphanumeric random strings without special characters
-- {time} / {duration} → Time durations like "5 min", "100 secs", "24 hours"
-- {date} / {datetime} → Dates and timestamps
-- {url} / {link} → URLs and web links
-- {phone} → Phone numbers with +, -, spaces
-- {email} → Email addresses
-- {id} → Transaction IDs, order IDs, reference numbers (alphanumeric)
-- {name} → Person names
-- {amount} → Money amounts like "$10.50", "100 INR", "50.00"
-- {number} → Any numeric value
-- {any} → Fallback for anything else
+${detectedOtp ? `OTP: ${detectedOtp}` : ''}
 
-=== HOW TO IDENTIFY THE OTP ===
-The OTP is usually:
-- A 4-8 digit number near words like "OTP", "code", "verification", "password"
-- Sometimes alphanumeric (ABC123, XY99Z)
-- Can be dash-separated (123-456)
-- Appears at the beginning or middle of the message
-- Is NOT the word "OTP" itself - that's just a label
+${validationResult && !validationResult.valid ? `ERROR: ${validationResult.reason}` : ''}
 
-=== EXAMPLES ===
-
-Example 1 - Simple numeric OTP:
-SMS: "Your verification code is 123456. Valid for 10 minutes."
-Template: "Your verification code is {otp}. Valid for {time}."
-
-Example 2 - OTP with repeated value:
-SMS: "Dear customer, 5672 is the one Time Password from Vi. Expires in 3 min. OTP @www.myvi.in #5672"
-Template: "Dear customer, {otp} is the one Time Password from Vi. Expires in {time}. OTP @{url} #{any}"
-
-Example 3 - OTP word appears multiple times, value appears once:
-SMS: "341722 is your One time password (OTP) to login to MyJio. Don't share OTP with anyone. Please enter the OTP to proceed."
-Template: "{otp} is your One time password (OTP) to login to MyJio. Don't share OTP with anyone. Please enter the OTP to proceed."
-
-Example 4 - Complex with URL and reference:
-SMS: "<#> 1770 is your OTP for Amazon login. Valid for 5 mins. Don't share. Call 1800-123-4567 for help. Ref: ABC123XYZ"
-Template: "<#> {otp} is your OTP for Amazon login. Valid for {time}. Don't share. Call {phone} for help. Ref: {id}"
-
-Example 5 - Alphanumeric OTP:
-SMS: "Your access code is AB92X1. This code expires in 15 minutes. Do not share."
-Template: "Your access code is {otp}. This code expires in {time}. Do not share."
-
-Example 6 - With transaction ID:
-SMS: "OTP to authorize txn of $50.00 at STORE is 789456. Transaction ID: TXN123456789"
-Template: "OTP to authorize txn of {amount} at STORE is {otp}. Transaction ID: {id}"
-
-Example 7 - With link:
-SMS: "Verify your account: 456789 is your code. Visit https://example.com/verify if you didn't request this."
-Template: "Verify your account: {otp} is your code. Visit {url} if you didn't request this."
-
-Example 8 - Multiple IDs and numbers:
-SMS: "Your Uber OTP is 2847. Request for ride to 123 Main St. Driver: John D. Trip ID: 4567890123"
-Template: "Your Uber OTP is {otp}. Request for ride to {number} {id}. Driver: {name}. Trip ID: {id}"
-
-Example 9 - OTP at start with unusual suffix:
-SMS: "471154 is your OTP for login/signup. Valid for 5 mins. Do not share. -----ORGEN"
-Template: "{otp} is your OTP for login/signup. Valid for {time}. Do not share. {any}"
-
-Example 10 - OTP with sender signature:
-SMS: "123456 is your verification code. Valid 10 minutes. - Sent by MyBank"
-Template: "{otp} is your verification code. Valid {time}. {any}"
-
-Example 11 - Complex format with hash:
-SMS: "<#> 1770 is your OTP to login into Airtel Thanks app. Valid for 100 secs. Do not share with anyone. If this was not you click i.airtel.in/Contact N9BWuqauU1y"
-Template: "<#> {otp} is your OTP to login into Airtel Thanks app. Valid for {time}. Do not share with anyone. If this was not you click {url} {any}"
-
-${detectedOtp ? `\n=== HINT: I detected "${detectedOtp}" as the likely OTP. Replace this with {otp} ===` : ''}
-
-${validationResult && !validationResult.valid ? `
-=== PREVIOUS ATTEMPT FAILED ===
-Error: ${validationResult.reason}
-
-${validationResult.reason.includes('multiple')
-  ? 'The template had multiple {otp} placeholders. Remember: ONLY the actual OTP code gets {otp}, not the word "OTP" or other numbers.'
-  : validationResult.reason.includes('No {otp}')
-  ? 'The template had no {otp} placeholder. You must identify and replace the OTP code with {otp}.'
-  : 'The template could not extract the OTP. Check that:\n1. You replaced the correct OTP code with {otp}\n2. You preserved all static text exactly\n3. You used appropriate placeholders for dynamic content'}
-
-=== FIX IT NOW ===
-- Find the actual OTP code in the SMS (usually 4-8 digits, near "OTP", "code", "verification")
-- Replace ONLY that code with {otp}
-- Keep all other numbers/IDs using appropriate placeholders ({digits}, {id}, {number}, etc.)
-- Preserve all text exactly as-is
-` : ''}
-
-=== YOUR TASK ===
-Convert this SMS to a template:
-"${smsText}"
-
-Return ONLY the template string, nothing else. No explanations, no markdown, no quotes around the answer.
-`;
+"${smsText}" →`;
 
       const completion = await openai.chat.completions.create({
         model: "deepseek-chat",
@@ -306,10 +237,12 @@ Output format: Just the template string, nothing else.`
 
       // Clean the template - remove markdown formatting, quotes, etc.
       template = template
-        .replace(/^```[\s\S]*?\n?/, '') // Remove code blocks
         .replace(/^Template:\s*/i, '') // Remove "Template:" prefix
-        .replace(/^["'`]|["'`]$/g, '') // Remove surrounding quotes
-        .replace(/^```$/, '') // Remove trailing code block markers
+        // Extract text after arrow if present (DeepSeek sometimes returns: "SMS" → "template")
+        .replace(/^.*?→\s*['"`]?([^'"`]+)['"`]?$/s, '$1')
+        .replace(/^```[\s\S]*?\n?/, '') // Remove code block opening
+        .replace(/```$/g, '') // Remove code block closing
+        .replace(/^["'`]+|["'`]+$/g, '') // Remove surrounding quotes (multiple)
         .trim();
 
       // Validate the generated template

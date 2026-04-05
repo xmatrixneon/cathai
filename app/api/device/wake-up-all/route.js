@@ -5,13 +5,17 @@ import connectDB from '@/lib/db';
 
 export async function POST(request) {
   try {
+    console.log('[wake-up-all] Starting request');
     await connectDB();
+    console.log('[wake-up-all] DB connected');
 
     // Find all offline devices with FCM tokens
+    console.log('[wake-up-all] Querying for offline devices...');
     const offlineDevices = await Device.find({
       status: 'offline',
       fcmToken: { $ne: null, $ne: '' }
     });
+    console.log('[wake-up-all] Found', offlineDevices.length, 'offline devices');
 
     if (offlineDevices.length === 0) {
       return NextResponse.json({
@@ -30,7 +34,12 @@ export async function POST(request) {
     const results = [];
 
     // Send wake-up to each device
-    for (const device of offlineDevices) {
+    console.log('[wake-up-all] Starting to send notifications to', offlineDevices.length, 'devices');
+    for (let i = 0; i < offlineDevices.length; i++) {
+      const device = offlineDevices[i];
+      if (i % 10 === 0) {
+        console.log(`[wake-up-all] Progress: ${i}/${offlineDevices.length} devices processed`);
+      }
       const success = await sendWakeUpNotification(device.deviceId, device.fcmToken);
       results.push({
         deviceId: device.deviceId,
@@ -43,6 +52,7 @@ export async function POST(request) {
         failCount++;
       }
     }
+    console.log('[wake-up-all] Completed sending notifications');
 
     return NextResponse.json({
       success: true,
