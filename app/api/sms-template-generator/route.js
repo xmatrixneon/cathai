@@ -55,37 +55,49 @@ function buildSmartOtpRegexList(formats) {
 
       pattern = pattern
         .replace(/\\s+/g, "\\s*")
-        .replace(/\\:/g, "[:：]?")
-        .replace(/\\\./g, ".*");
+        .replace(/\\:/g, "[:：]?");
+
+      // ✅ Smarter dot replacement: only replace dots that are truly sentence endings
+      // Don't replace dots in URLs, abbreviations, or other contexts
+      pattern = pattern
+        // Replace dots at end of string (like "-----ORGEN" suffix)
+        .replace(/\\\.$/g, ".*")
+        // Replace dots followed by space + capital letter (sentence endings)
+        .replace(/\\\.\s+(?=[A-Z])|\\\.\s*$|\\\.\s*-----/g, "\\.\\s*")
+        // Keep all other dots as literal (for URLs, abbreviations, etc.)
+        .replace(/\\\./g, "\\.");
 
       return new RegExp(pattern, "i");
     })
     .filter(Boolean);
 }
 
-// Advanced OTP detection for template generation
+// Smart OTP detection using AI - no hardcoded patterns
+// This will be called only for initial hint, AI will do the real work
 function detectOtpInMessage(message) {
-  const patterns = [
-    // Standalone 4-8 digit code (most common)
-    /(?:^|\s)(\d{4,8})(?:\s|$|\.|,)/,
-    // Alphanumeric code (3-12 chars)
-    /(?:^|\s)([A-Za-z0-9]{3,12})(?:\s|$|\.|,)/,
-    // Code with word "OTP" nearby
-    /(?:OTP|code|password|verification|pin)[s:\s]*(?:is|:)?\s*([A-Za-z0-9\-]{3,12})/i,
-    // Dash separated (123-456)
-    /(\d{3}-\d{3})/,
-    // Code in quotes
-    /['"(\[]([A-Za-z0-9\-]{3,12})['"\])]/
-  ];
+  // Simple heuristic: find the most likely 4-8 digit number
+  // Prefer numbers near OTP-related words
+  const words = message.toLowerCase().split(/\s+/);
+  const otpWords = ['otp', 'code', 'verification', 'password', 'pin', 'login'];
 
-  for (const pattern of patterns) {
-    const match = message.match(pattern);
-    if (match && match[1]) {
-      return match[1];
+  // Find sentences with OTP-related words
+  const sentences = message.split(/[.!?]+/);
+
+  for (const sentence of sentences) {
+    const lowerSentence = sentence.toLowerCase();
+    if (otpWords.some(w => lowerSentence.includes(w))) {
+      // Extract 4-8 digit number from this sentence
+      const match = sentence.match(/\b(\d{4,8})\b/);
+      if (match) return match[1];
+      // Try alphanumeric
+      const alphaMatch = sentence.match(/\b([A-Za-z0-9]{3,12})\b/);
+      if (alphaMatch) return alphaMatch[1];
     }
   }
 
-  return null;
+  // Fallback: first 4-8 digit number in message
+  const fallbackMatch = message.match(/\b(\d{4,8})\b/);
+  return fallbackMatch ? fallbackMatch[1] : null;
 }
 
 const openai = new OpenAI({
@@ -159,6 +171,7 @@ You are an expert SMS template generator. Convert the following SMS message into
 3. The word "OTP", "code", "password" in the message text should be preserved as-is
 4. If the actual OTP number appears multiple times, use {any} for subsequent occurrences
 5. Match the SMS structure EXACTLY - preserve all punctuation, spacing, and static text
+6. IMPORTANT: Unusual suffixes like "-----ORGEN", random codes, or sender signatures at the end should be replaced with {any}
 
 === PLACEHOLDERS AVAILABLE ===
 Primary:
@@ -219,6 +232,18 @@ Template: "Verify your account: {otp} is your code. Visit {url} if you didn't re
 Example 8 - Multiple IDs and numbers:
 SMS: "Your Uber OTP is 2847. Request for ride to 123 Main St. Driver: John D. Trip ID: 4567890123"
 Template: "Your Uber OTP is {otp}. Request for ride to {number} {id}. Driver: {name}. Trip ID: {id}"
+
+Example 9 - OTP at start with unusual suffix:
+SMS: "471154 is your OTP for login/signup. Valid for 5 mins. Do not share. -----ORGEN"
+Template: "{otp} is your OTP for login/signup. Valid for {time}. Do not share. {any}"
+
+Example 10 - OTP with sender signature:
+SMS: "123456 is your verification code. Valid 10 minutes. - Sent by MyBank"
+Template: "{otp} is your verification code. Valid {time}. {any}"
+
+Example 11 - Complex format with hash:
+SMS: "<#> 1770 is your OTP to login into Airtel Thanks app. Valid for 100 secs. Do not share with anyone. If this was not you click i.airtel.in/Contact N9BWuqauU1y"
+Template: "<#> {otp} is your OTP to login into Airtel Thanks app. Valid for {time}. Do not share with anyone. If this was not you click {url} {any}"
 
 ${detectedOtp ? `\n=== HINT: I detected "${detectedOtp}" as the likely OTP. Replace this with {otp} ===` : ''}
 

@@ -61,8 +61,17 @@ function buildSmartOtpRegexList(formats) {
 
       pattern = pattern
         .replace(/\\s+/g, "\\s*")
-        .replace(/\\:/g, "[:：]?")
-        .replace(/\\\./g, ".*");
+        .replace(/\\:/g, "[:：]?");
+
+      // ✅ Smarter dot replacement: only replace dots that are truly sentence endings
+      // Don't replace dots in URLs, abbreviations, or other contexts
+      pattern = pattern
+        // Replace dots at end of string (like "-----ORGEN" suffix)
+        .replace(/\\\.$/g, ".*")
+        // Replace dots followed by space + capital letter (sentence endings)
+        .replace(/\\\.\s+(?=[A-Z])|\\\.\s*$|\\\.\s*-----/g, "\\.\\s*")
+        // Keep all other dots as literal (for URLs, abbreviations, etc.)
+        .replace(/\\\./g, "\\.");
 
       return new RegExp(pattern, "i");
     })
