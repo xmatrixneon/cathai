@@ -1,0 +1,65 @@
+========================================
+       BACKUP MANIFEST
+========================================
+
+Backup Date: 2026-04-06 06:46:32 UTC
+Backup Location: /var/www/cattysms/backup/backup_20260406_064632
+
+----------------------------------------
+BACKUP CONTENTS
+----------------------------------------
+
+1. NGINX CONFIGURATION (nginx/)
+   - nginx.conf - Main nginx configuration
+
+2. STUBS PHP CODE (stubs/)
+   - handler_api.php - Main API endpoint with cooldown logic
+   - 2handler_api.php - Alternative version with OTP detection regex
+   - handler_api.php.bak - Backup of previous version (not included - use .bak in source)
+   - composer.json - PHP dependencies manifest
+   - t.php - Test file
+   NOTE: vendor/ directory excluded (dependencies can be restored via composer install)
+
+3. ENVIRONMENT CONFIGURATION
+   - .env - Application environment variables (contains sensitive data)
+
+4. MONGODB DATABASE (mongodb/)
+   Database: smsgateway
+   Collections:
+   - orders (64,303 documents) - SMS activation orders
+   - numbers (2,058 documents) - Available phone numbers
+   - devices (1,520 documents) - Android gateway devices
+   - messages (5,227 documents) - SMS message history
+   - locks (29,692 documents) - Number locks per service/country
+   - services (347 documents) - Supported services
+   - users (1 document) - Web admin users
+   - mobileusers (1 document) - Mobile app users
+   - tokens (3 documents) - Authentication tokens
+   - panels (2 documents) - Admin panels
+   - countires (1 document) - Supported countries [sic]
+   - cronstatuses (1 document) - Cron job status
+
+----------------------------------------
+RESTORE INSTRUCTIONS
+----------------------------------------
+
+To restore from this backup:
+
+1. Restore Nginx:
+   sudo cp nginx/nginx.conf /etc/nginx/
+   sudo nginx -t && sudo systemctl reload nginx
+
+2. Restore Stubs PHP:
+   sudo cp stubs/*.php /var/www/html/stubs/
+   sudo cp stubs/composer.json /var/www/html/stubs/
+   cd /var/www/html/stubs && composer install
+
+3. Restore .env:
+   cp .env /var/www/cattysms/
+
+4. Restore MongoDB:
+   mongorestore --uri="mongodb://smsgateway:PASSWORD@localhost:27017/smsgateway?authSource=smsgateway" mongodb/
+
+----------------------------------------
+Total Backup Size: 68M
+========================================
