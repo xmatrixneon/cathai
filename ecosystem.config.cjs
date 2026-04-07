@@ -18,9 +18,6 @@ module.exports = {
       SMS_SUSPEND_WINDOW_HOURS: '12'
     }
   }, {
-    name: 'manager:wakeup',
-    script: 'script/wakeup.mjs'
-  }, {
     name: 'manager:cleanup-messages',
     script: 'script/cleanup-messages.mjs',
     env: {
@@ -28,6 +25,14 @@ module.exports = {
       MESSAGE_RETENTION_HOURS: '12',
       MESSAGE_CLEANUP_DRY_RUN: 'false',
       MESSAGE_CLEANUP_BATCH_SIZE: '1000'
+    }
+  }, {
+    name: 'manager:keepalive',
+    script: 'script/keepalive.mjs',
+    env: {
+      FCM_KEEP_ALIVE_CRON: '*/30 * * * * *',
+      FCM_KEEP_ALIVE_COOLDOWN: '3',
+      FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE: '45'
     }
   }]
 };

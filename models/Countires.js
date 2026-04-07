@@ -24,6 +24,9 @@ const CountiresSchema = new mongoose.Schema({
   }
 });
 
+// Performance optimization index for faster lookups
+CountiresSchema.index({ _id: 1, name: 1, flag: 1, code: 1 });
+
 const Countires = mongoose.models.Countires || mongoose.model('Countires', CountiresSchema);
 
 export default Countires;

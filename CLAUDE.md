@@ -55,6 +55,8 @@ pm2 logs manager                      # View main app logs
 pm2 logs manager:numberstatus        # View status sync logs
 pm2 logs manager:fetchsms            # View SMS fetch logs
 pm2 logs manager:suspendlowsms       # View SMS suspend monitor logs
+pm2 logs manager:cleanup-messages    # View message cleanup logs
+pm2 logs manager:keepalive           # View FCM keep-alive logs
 
 # FCM Wake-Up Service (run separately)
 pm2 start script/wakeup.mjs --name "manager:wakeup"
@@ -65,12 +67,14 @@ node script/create-mobile-user.mjs <email> <password> <name>
 
 ## PM2 Apps
 
-The system runs 4 PM2 processes (configured in `ecosystem.config.cjs`):
+The system runs 6 PM2 processes (configured in `ecosystem.config.cjs`):
 
 1. **manager** - Main Next.js app (`npm start`)
 2. **manager:numberstatus** - Device/number status sync script (`script/status.mjs`)
 3. **manager:fetchsms** - SMS fetch script (`script/fetch.mjs`)
 4. **manager:suspendlowsms** - SMS quality monitor (`script/suspend-low-sms.mjs`)
+5. **manager:cleanup-messages** - Message cleanup service (`script/cleanup-messages.mjs`)
+6. **manager:keepalive** - FCM keep-alive service (`script/keepalive.mjs`)
 
 ## Architecture
 
@@ -165,6 +169,45 @@ Runs independently (not in PM2 config) to automatically wake up offline devices:
 
 **Device model additions:**
 - `fcmToken` - Firebase Cloud Messaging token for wake-up notifications
+
+### Message Cleanup Service (`script/cleanup-messages.mjs`)
+
+Runs as PM2 process `manager:cleanup-messages`:
+
+**Behavior:**
+- Deletes SMS messages older than retention period (default: 12 hours)
+- Deletes in batches to avoid memory issues (default: 1000 messages per batch)
+- Runs on startup and periodically (default: every 6 hours)
+- Supports dry-run mode for testing
+
+**Configuration via env vars:**
+- `MESSAGE_CLEANUP_ENABLED` - Enable/disable cleanup (default: true)
+- `MESSAGE_RETENTION_HOURS` - How long to keep messages (default: 12)
+- `MESSAGE_CLEANUP_DRY_RUN` - Test mode without actual deletion (default: false)
+- `MESSAGE_CLEANUP_BATCH_SIZE` - Messages per batch (default: 1000)
+- `MESSAGE_CLEANUP_CRON` - Schedule interval (default: `0 */6 * * *` = every 6 hours)
+
+### FCM Keep-Alive Service (`script/keepalive.mjs`)
+
+Runs as PM2 process `manager:keepalive` to proactively keep devices online:
+
+**Behavior:**
+- Scans for devices that have active orders (not just offline devices)
+- Sends FCM keep-alive pings to prevent devices from going offline
+- Skips devices with recent heartbeats (default: 45 seconds minimum)
+- Respects cooldown period (default: 3 minutes) between pings
+- Cleans up stale FCM tokens automatically
+- Runs periodically (default: every 30 seconds)
+
+**Key difference from Wake-Up Service:**
+- Wake-Up: Reactive - wakes devices that are already offline
+- Keep-Alive: Proactive - prevents devices with active orders from going offline
+
+**Configuration via env vars:**
+- `FCM_SERVICE_ACCOUNT_KEY` - Path to Firebase service account key JSON file (required)
+- `FCM_KEEP_ALIVE_CRON` - Scan interval (default: `*/30 * * * * *` = every 30 sec)
+- `FCM_KEEP_ALIVE_COOLDOWN` - Minutes between keep-alive attempts (default: 3)
+- `FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE` - Min heartbeat age in seconds (default: 45)
 
 ### Number Quality Management API
 
@@ -261,6 +304,18 @@ Optional:
 - `SMS_SUSPEND_WINDOW_HOURS` - Time window for SMS counting (default: 24)
 - `SMS_SUSPEND_DRY_RUN` - Log actions without executing (default: false)
 - `SMS_TEST_NUMBER` - Test mode: only process this specific number (default: null)
+
+**Message Cleanup (script/cleanup-messages.mjs):**
+- `MESSAGE_CLEANUP_ENABLED` - Enable message cleanup (default: true)
+- `MESSAGE_RETENTION_HOURS` - How long to keep messages before deletion (default: 12)
+- `MESSAGE_CLEANUP_DRY_RUN` - Test mode without actual deletion (default: false)
+- `MESSAGE_CLEANUP_BATCH_SIZE` - Messages per batch (default: 1000)
+- `MESSAGE_CLEANUP_CRON` - Schedule interval (default: `0 */6 * * *` = every 6 hours)
+
+**FCM Keep-Alive (script/keepalive.mjs):**
+- `FCM_KEEP_ALIVE_CRON` - Scan interval cron format (default: `*/30 * * * * *` = every 30 sec)
+- `FCM_KEEP_ALIVE_COOLDOWN` - Minutes between keep-alive attempts (default: 3)
+- `FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE` - Min heartbeat age in seconds to ping (default: 45)
 
 ## TypeScript Configuration
 

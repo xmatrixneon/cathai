@@ -152,67 +152,91 @@ async function syncDeviceNumbers() {
           allDeviceNumberPorts.add(port);
 
           let phoneNumber = String(sim.phoneNumber).replace(/\D/g, '');
-          // Handle Indian phone numbers: remove 91 prefix from various formats
-          // Indian mobile numbers must start with 6, 7, 8, or 9
-          const isValidIndianMobile = (num) => /^[6-9]\d{9}$/.test(num);
+          const originalInput = String(sim.phoneNumber);
 
-          if (phoneNumber.length > 10 && phoneNumber.startsWith("91")) {
-            // First try: extract 10 digits after country code "91"
+          // Validate and process phone number
+          const isValidIndianMobile = (num) => /^[6-9]\d{9}$/.test(num);
+          let invalidReason = null;
+          let finalNumber = phoneNumber;
+
+          // Case 1: Too short (< 10 digits)
+          if (phoneNumber.length < 10) {
+            invalidReason = `Too short (${phoneNumber.length} digits, need 10)`;
+          }
+          // Case 2: Remove 91 country code for Indian numbers
+          else if (phoneNumber.length > 10 && phoneNumber.startsWith("91")) {
             let extracted = phoneNumber.substring(2, 12);
 
-            // If invalid (doesn't start with 6-9 or not 10 digits), try last 10 digits as fallback
+            // If invalid, try last 10 digits as fallback
             if (!isValidIndianMobile(extracted)) {
               let fallback = phoneNumber.substring(phoneNumber.length - 10);
-              // Only use fallback if it's also valid
               if (isValidIndianMobile(fallback)) {
                 extracted = fallback;
               } else {
-                // Both failed - mark as invalid to skip syncing
-                extracted = '';
+                invalidReason = `Invalid Indian format (after removing 91: "${extracted}", fallback: "${fallback}")`;
               }
             }
 
-            phoneNumber = extracted;
-          }
-          phoneNumber = parseInt(phoneNumber);
-
-          if (phoneNumber && phoneNumber.toString().length === 10) {
-            syncedPhoneNumbers.add(phoneNumber);
-
-            // Deactivate old number if SIM number changed on same port
-            const oldNumbers = await Numbers.find({ port, number: { $ne: phoneNumber }, active: true });
-            if (oldNumbers.length > 0) {
-              await Numbers.updateMany(
-                { port, number: { $ne: phoneNumber }, active: true },
-                { $set: { active: false, signal: 0 } }
-              );
-              oldNumbers.forEach(old => {
-                console.log(`🔄 SIM SWAP  ${old.number} → ${phoneNumber}  (${port})`);
-              });
-              numberChangedCount += oldNumbers.length;
+            if (!invalidReason) {
+              finalNumber = extracted;
             }
-
-            await Numbers.findOneAndUpdate(
-              { number: phoneNumber },
-              {
-                $set: {
-                  countryid: indiaId,
-                  port,
-                  operator: sim.carrier || null,
-                  signal: isOnline ? (sim.signalStrength || 0) : 0,
-                  active: isOnline,
-                  lastRotation: new Date(),
-                  locked: false,
-                  iccid: sim.iccid || null,
-                  imsi: sim.imsi || null
-                }
-              },
-              { upsert: true, new: true }
-            );
-            syncedCount++;
-          } else {
-            console.log(`⚠️  INVALID  ${device.deviceId} SIM${sim.slot} → "${sim.phoneNumber}"`);
           }
+          // Case 3: Exactly 10 digits but invalid format
+          else if (phoneNumber.length === 10) {
+            if (!isValidIndianMobile(phoneNumber)) {
+              invalidReason = `Invalid Indian format (must start with 6-9)`;
+            }
+          }
+          // Case 4: Too long without 91 prefix
+          else {
+            invalidReason = `Too long (${phoneNumber.length} digits, expected 10)`;
+          }
+
+          // Final validation
+          if (invalidReason || !isValidIndianMobile(finalNumber)) {
+            console.log(`⚠️  INVALID  ${device.deviceId} SIM${sim.slot} → "${originalInput}"`);
+            console.log(`   Reason: ${invalidReason || 'Unknown error'}`);
+            if (finalNumber !== phoneNumber) {
+              console.log(`   Processed: "${phoneNumber}" → "${finalNumber}"`);
+            }
+            continue; // Skip this SIM
+          }
+
+          // Convert to number for storage (safe now since we know it's 10 digits)
+          const numberValue = parseInt(finalNumber);
+          syncedPhoneNumbers.add(numberValue);
+
+          // Deactivate old number if SIM number changed on same port
+          const oldNumbers = await Numbers.find({ port, number: { $ne: numberValue }, active: true });
+          if (oldNumbers.length > 0) {
+            await Numbers.updateMany(
+              { port, number: { $ne: numberValue }, active: true },
+              { $set: { active: false, signal: 0 } }
+            );
+            oldNumbers.forEach(old => {
+              console.log(`🔄 SIM SWAP  ${old.number} → ${numberValue}  (${port})`);
+            });
+            numberChangedCount += oldNumbers.length;
+          }
+
+          await Numbers.findOneAndUpdate(
+            { number: numberValue },
+            {
+              $set: {
+                countryid: indiaId,
+                port,
+                operator: sim.carrier || null,
+                signal: isOnline ? (sim.signalStrength || 0) : 0,
+                active: isOnline,
+                lastRotation: new Date(),
+                locked: false,
+                iccid: sim.iccid || null,
+                imsi: sim.imsi || null
+              }
+            },
+            { upsert: true, new: true }
+          );
+          syncedCount++;
         }
       }
     }

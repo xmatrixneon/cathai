@@ -36,26 +36,75 @@ mkdirSync(nginxBackupDir, { recursive: true });
 mkdirSync(stubsBackupDir, { recursive: true });
 
 // Parse MongoDB URI from .env
-let dbUser, dbPass, dbHost, dbPort, dbName;
+let dbUser, dbPass, dbHost, dbPort, dbName, authSource;
+let useAuth = false;
+
 try {
-  const envContent = require('fs').readFileSync(join(PROJECT_ROOT, '.env'), 'utf-8');
-  const mongoUri = envContent.match(/MONGODB_URI=(.+)/)?.[1];
+  const { readFileSync } = await import('fs');
+  const envContent = readFileSync(join(PROJECT_ROOT, '.env'), 'utf-8');
+  const mongoUriMatch = envContent.match(/MONGODB_URI=(.+)/);
+  const mongoUri = mongoUriMatch ? mongoUriMatch[1].trim() : null;
 
   if (mongoUri) {
-    const uri = mongoUri.replace('mongodb://', '').replace(/\?.*/, '');
-    const [authPart, hostPart] = uri.split('@');
-    [dbUser, dbPass] = authPart.split(':');
+    useAuth = true;
+    console.log(`✅ Found MongoDB URI in .env file`);
+
+    // Parse MongoDB URI: mongodb://user:pass@host:port/db?options
+    // Note: password may contain @ symbol, so we need to split from the right
+    const uriWithoutProtocol = mongoUri.replace('mongodb://', '');
+
+    // Find the last @ before the host part (password may contain @)
+    const atSignIndex = uriWithoutProtocol.lastIndexOf('@');
+    if (atSignIndex === -1) {
+      throw new Error('Invalid MongoDB URI: no @ sign found');
+    }
+
+    const authPart = uriWithoutProtocol.substring(0, atSignIndex);
+    const hostAndDbPart = uriWithoutProtocol.substring(atSignIndex + 1);
+
+    // Parse credentials (everything before first @ is user, rest is password)
+    const firstAtSign = authPart.indexOf('@');
+    if (firstAtSign !== -1) {
+      // Password contains @ symbol
+      dbUser = authPart.substring(0, firstAtSign);
+      dbPass = authPart.substring(firstAtSign + 1);
+    } else {
+      [dbUser, dbPass] = authPart.split(':');
+    }
     dbPass = decodeURIComponent(dbPass);
-    [dbHost, dbPort] = hostPart.split(':');
-    dbName = mongoUri.match(/\/([^\?]+)/)?.[1];
+
+    // Split host:port and database
+    const [hostAndPort, database] = hostAndDbPart.split('?')[0].split('/');
+
+    // Parse host and port
+    const colonIndex = hostAndPort.lastIndexOf(':');
+    if (colonIndex > 0) {
+      dbHost = hostAndPort.substring(0, colonIndex);
+      dbPort = hostAndPort.substring(colonIndex + 1);
+    } else {
+      dbHost = hostAndPort;
+      dbPort = '27017';
+    }
+
+    dbName = database || 'smsgateway';
+
+    // Extract authSource from options
+    const optionsPart = hostAndDbPart.split('?')[1];
+    if (optionsPart) {
+      const authSourceMatch = optionsPart.match(/authSource=([^&]+)/);
+      authSource = authSourceMatch ? authSourceMatch[1] : 'admin';
+    } else {
+      authSource = 'admin';
+    }
   }
 } catch (e) {
-  console.warn('⚠️  Could not parse .env file, using defaults');
-  dbUser = 'smsgateway';
-  dbPass = 'Trainman@843411';
+  console.warn('⚠️  Could not parse .env file, using defaults (no auth)');
+  console.warn('⚠️  Error:', e.message);
+  useAuth = false;
   dbHost = 'localhost';
   dbPort = '27017';
   dbName = 'smsgateway';
+  authSource = 'admin';
 }
 
 console.log(`📦 Database: ${dbName} @ ${dbHost}:${dbPort}`);
@@ -67,7 +116,15 @@ function backupDatabase() {
   console.log('\n📊 Backing up MongoDB database...');
 
   try {
-    const cmd = `mongodump --uri="mongodb://${dbUser}:${encodeURIComponent(dbPass)}@${dbHost}:${dbPort}/${dbName}?authSource=${dbName}" --out="${dbBackupDir}"`;
+    let cmd;
+    if (useAuth) {
+      // URL encode the password to handle special characters like @
+      const encodedPassword = encodeURIComponent(dbPass);
+      cmd = `mongodump --uri="mongodb://${dbUser}:${encodedPassword}@${dbHost}:${dbPort}/${dbName}?authSource=${authSource}" --out="${dbBackupDir}"`;
+    } else {
+      cmd = `mongodump --uri="mongodb://${dbHost}:${dbPort}/${dbName}" --out="${dbBackupDir}"`;
+    }
+
     execSync(cmd, { stdio: 'inherit' });
     console.log(`✅ Database backup completed: ${dbBackupDir}`);
   } catch (error) {
@@ -122,7 +179,7 @@ function backupNginx() {
 function backupStubs() {
   console.log('\n📝 Backing up Stubs API files...');
 
-  const stubsDir = '/var/www/html/stubs';
+  const stubsDir = '/home/deploy/apps/stubs';
   const filesToBackup = [
     'handler_api.php',
     'handler_api.php.bak',

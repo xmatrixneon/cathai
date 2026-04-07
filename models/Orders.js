@@ -84,6 +84,21 @@ const OrdersSchema = new mongoose.Schema({
 OrdersSchema.index({ number: 1, active: 1, failureReason: 1 });
 OrdersSchema.index({ number: 1, createdAt: -1 });
 
+// Additional performance optimization indexes
+OrdersSchema.index({ countryid: 1, serviceid: 1, active: 1, createdAt: -1 });
+OrdersSchema.index({ active: 1, isused: 1, createdAt: -1 });
+OrdersSchema.index({ active: 1, failureReason: 1, createdAt: -1 });
+
+// Covered query index for number allocation
+OrdersSchema.index({
+  number: 1,
+  active: 1,
+  countryid: 1,
+  serviceid: 1,
+  createdAt: -1,
+  isused: 1
+});
+
 const Orders = mongoose.models.Orders || mongoose.model('Orders', OrdersSchema);
 
 export default Orders;

@@ -81,7 +81,12 @@ function containsKeywords(msg, keywords) {
 
 // Connect once
 mongoose
-  .connect(MONGO_URI)
+  .connect(MONGO_URI, {
+    maxPoolSize: 100,
+    minPoolSize: 10,
+    socketTimeoutMS: 45000,
+    serverSelectionTimeoutMS: 5000
+  })
   .then(() => console.log("✅ MongoDB connected"))
   .catch((e) => {
     console.error("❌ MongoDB connection error:", e);

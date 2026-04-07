@@ -129,6 +129,19 @@ NumbersSchema.index({ qualityScore: 1, suspended: 1, active: 1 });
 NumbersSchema.index({ suspended: 1, suspendedAt: 1 });
 NumbersSchema.index({ 'recentFailures.failedAt': 1 });
 
+// Additional performance optimization indexes
+NumbersSchema.index({ active: 1, countryid: 1 });
+NumbersSchema.index({
+  active: 1,
+  suspended: 1,
+  countryid: 1,
+  qualityScore: -1,
+  operator: 1,
+  signal: -1
+});
+NumbersSchema.index({ active: 1, suspended: 1, operator: 1, qualityScore: -1 });
+NumbersSchema.index({ port: 1, active: 1, 'sims.phoneNumber': 1 });
+
 // Prevent model overwrite in dev
 const Numbers = mongoose.models.Numbers || mongoose.model('Numbers', NumbersSchema);
 
