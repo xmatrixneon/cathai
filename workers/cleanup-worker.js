@@ -2,6 +2,7 @@
 import { config } from 'dotenv';
 import { Worker } from 'bullmq';
 import mongoose from 'mongoose';
+import connectDB from '../lib/db.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { getRedis } from '../lib/queues/redis.js';
@@ -17,9 +18,6 @@ const __dirname = dirname(__filename);
 config({ path: join(__dirname, '..', '.env.local') });
 config({ path: join(__dirname, '..', '.env') });
 
-// MongoDB connection
-const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
-
 // Check if worker is enabled
 if (process.env.BULLMQ_CLEANUP_ENABLED !== 'true') {
   console.log('[Cleanup Worker] Disabled (BULLMQ_CLEANUP_ENABLED != true)');
@@ -27,8 +25,22 @@ if (process.env.BULLMQ_CLEANUP_ENABLED !== 'true') {
 }
 
 // Connect to MongoDB before starting worker
-await mongoose.connect(MONGO_URI);
-console.log('[Cleanup] MongoDB connected');
+await connectDB();
+
+// Schedule initial job if queue is empty
+const delayedCount = await cleanupQueue.getDelayedCount();
+if (delayedCount === 0) {
+  await cleanupQueue.add(
+    'maintenance-cleanup',
+    {
+      type: 'scheduled',
+      runId: crypto.randomUUID(),
+      startedAt: Date.now(),
+    },
+    { delay: CLEANUP_INTERVAL }
+  );
+  console.log('[Cleanup] Initial job scheduled');
+}
 
 const worker = new Worker('maintenance-cleanup', async (job) => {
   return withJobLogging(job, async () => {

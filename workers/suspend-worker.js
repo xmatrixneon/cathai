@@ -2,6 +2,7 @@
 import { config } from 'dotenv';
 import { Worker } from 'bullmq';
 import mongoose from 'mongoose';
+import connectDB from '../lib/db.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { getRedis } from '../lib/queues/redis.js';
@@ -17,26 +18,39 @@ const __dirname = dirname(__filename);
 config({ path: join(__dirname, '..', '.env.local') });
 config({ path: join(__dirname, '..', '.env') });
 
-// MongoDB connection
-const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
-
 // Check if worker is enabled
-if (process.env.BULLMQ_SUSPEND_ENABLED !== 'true') {
-  console.log('[Suspend Worker] Disabled (BULLMQ_SUSPEND_ENABLED != true)');
+if (process.env.SMS_AUTO_SUSPEND_ENABLED === 'false') {
+  console.log('[Suspend Worker] Disabled (SMS_AUTO_SUSPEND_ENABLED == false)');
   process.exit(0);
 }
 
 // Connect to MongoDB before starting worker
-await mongoose.connect(MONGO_URI);
-console.log('[Suspend] MongoDB connected');
+await connectDB();
+
+// Schedule initial job if queue is empty
+const delayedCount = await suspendQueue.getDelayedCount();
+if (delayedCount === 0) {
+  await suspendQueue.add(
+    'quality-suspend',
+    {
+      type: 'suspend-check',
+      subType: 'suspend-check',
+      runId: crypto.randomUUID(),
+      startedAt: Date.now(),
+    },
+    { delay: SUSPEND_CHECK_INTERVAL }
+  );
+  console.log('[Suspend] Initial job scheduled');
+}
 
 const worker = new Worker('quality-suspend', async (job) => {
   return withJobLogging(job, async () => {
     const result = await handleSuspendJob(job.data);
 
-    // Schedule next run based on type
-    if (job.data.type === 'scheduled' && result.success) {
-      const nextType = job.data.subType === 'recovery-check' ? 'suspend-check' : 'recovery-check';
+    // Schedule next run based on type (alternate between suspend and recovery)
+    if (result.success) {
+      const currentType = job.data.type || 'suspend-check';
+      const nextType = currentType === 'suspend-check' ? 'recovery-check' : 'suspend-check';
       const nextInterval = nextType === 'suspend-check' ? SUSPEND_CHECK_INTERVAL : SUSPEND_RECOVER_INTERVAL;
 
       await suspendQueue.add(
@@ -46,7 +60,6 @@ const worker = new Worker('quality-suspend', async (job) => {
           subType: nextType,
           runId: crypto.randomUUID(),
           startedAt: Date.now(),
-          ...job.data,
         },
         { delay: nextInterval }
       );

@@ -2,6 +2,7 @@
 import { config } from 'dotenv';
 import { Worker } from 'bullmq';
 import mongoose from 'mongoose';
+import connectDB from '../lib/db.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { getRedis } from '../lib/queues/redis.js';
@@ -17,9 +18,6 @@ const __dirname = dirname(__filename);
 config({ path: join(__dirname, '..', '.env.local') });
 config({ path: join(__dirname, '..', '.env') });
 
-// MongoDB connection
-const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
-
 // Check if worker is enabled
 if (process.env.BULLMQ_FETCH_ENABLED !== 'true') {
   console.log('[Fetch Worker] Disabled (BULLMQ_FETCH_ENABLED != true)');
@@ -27,8 +25,7 @@ if (process.env.BULLMQ_FETCH_ENABLED !== 'true') {
 }
 
 // Connect to MongoDB before starting worker
-await mongoose.connect(MONGO_URI);
-console.log('[Fetch] MongoDB connected');
+await connectDB();
 
 const worker = new Worker('sms-fetch', async (job) => {
   return withJobLogging(job, async () => {
