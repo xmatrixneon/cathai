@@ -1,4 +1,5 @@
 // jobs/handlers/fetch-handler.js
+import mongoose from 'mongoose';
 import Orders from '../../models/Orders.js';
 import Message from '../../models/Message.js';
 import Numbers from '../../models/Numbers.js';
