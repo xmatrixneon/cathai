@@ -32,16 +32,6 @@ module.exports = {
         SMS_SUSPEND_WINDOW_HOURS: '12',
       },
     },
-    {
-      name: 'worker:wakeup',
-      script: 'workers/wakeup-worker.js',
-      autostart: false,  // Start disabled for testing
-      env: {
-        BULLMQ_WAKEUP_ENABLED: 'true',
-        FCM_WAKE_UP_OFFLINE_THRESHOLD: '120',
-        FCM_WAKE_UP_COOLDOWN: '5',
-      },
-    },
 
     // ==========================================
     // Legacy Cron Scripts (Keep for rollback)

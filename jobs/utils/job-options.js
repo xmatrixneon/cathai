@@ -30,15 +30,6 @@ export const jobOptions = {
     removeOnComplete: 50,
     removeOnFail: 200,
   },
-  'device-wakeup': {
-    attempts: 1,
-    backoff: {
-      type: 'fixed',
-      delay: 10000,
-    },
-    removeOnComplete: 100,
-    removeOnFail: 100,
-  },
   'quality-suspend': {
     attempts: 2,
     backoff: {
