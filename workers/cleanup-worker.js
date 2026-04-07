@@ -12,14 +12,14 @@ if (process.env.BULLMQ_CLEANUP_ENABLED !== 'true') {
   process.exit(0);
 }
 
-const worker = new Worker('maintenance-cleanup', async (job) => {
+const worker = new Worker('maintenance:cleanup', async (job) => {
   return withJobLogging(job, async () => {
     const result = await handleCleanupJob(job.data);
 
     // Schedule next run if this was a scheduled job and successful
     if (job.data.type === 'scheduled' && result.success) {
       await cleanupQueue.add(
-        'maintenance-cleanup',
+        'maintenance:cleanup',
         {
           type: 'scheduled',
           runId: crypto.randomUUID(),
@@ -34,7 +34,7 @@ const worker = new Worker('maintenance-cleanup', async (job) => {
   });
 }, {
   connection: getRedis(),
-  concurrency: getWorkerConcurrency('maintenance-cleanup', 1),
+  concurrency: getWorkerConcurrency('maintenance:cleanup', 1),
 });
 
 worker.on('completed', (job) => {
