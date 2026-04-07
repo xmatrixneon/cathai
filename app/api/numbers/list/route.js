@@ -13,35 +13,14 @@ export async function GET(req) {
     // Connect to MongoDB
     await dbConnect();
 
-    // Use aggregation pipeline instead of populate (much faster)
-    const startTime = Date.now();
-
-    const numbers = await Numbers.aggregate([
-      { $match: { active: true } }, // Filter active numbers first
-      {
-        $lookup: {
-          from: "countires", // Join with countries collection
-          localField: "countryid",
-          foreignField: "_id",
-          as: "country",
-          pipeline: [
-            { $project: { name: 1, flag: 1, code: 1 } } // Only select needed fields
-          ]
-        }
-      },
-      {
-        $unwind: {
-          path: "$country",
-          preserveNullAndEmptyArrays: true // Keep numbers without country data
-        }
-      },
-      {
-        $sort: { qualityScore: -1, createdAt: -1 } // Sort by quality then creation date
-      }
-    ]);
-
-    const queryTime = Date.now() - startTime;
-    console.log(`Numbers list query time: ${queryTime}ms (${numbers.length} numbers)`);
+    // Fetch only active numbers and populate country
+    const numbers = await Numbers.find({ active: true })
+      .populate({
+        path: "countryid",        // field in Numbers schema
+        model: Countries,         // Countries model
+        select: "name flag code", // select only needed fields
+      })
+      .lean();
 
     return NextResponse.json({ success: true, data: numbers });
   } catch (err) {

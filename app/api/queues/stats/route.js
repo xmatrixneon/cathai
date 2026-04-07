@@ -6,10 +6,10 @@ export async function GET() {
     const queues = await getAllQueues();
     const stats = [];
 
-    for (const queue of queues) {
+    for (const { name, queue } of queues) {
       const counts = await queue.getJobCounts();
       stats.push({
-        name: queue.name,
+        name,
         waiting: counts.waiting || 0,
         active: counts.active || 0,
         completed: counts.completed || 0,

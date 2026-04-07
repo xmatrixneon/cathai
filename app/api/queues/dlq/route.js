@@ -10,9 +10,9 @@ export async function GET(req) {
     const queues = await getAllQueues();
     const failedJobs = {};
 
-    for (const queue of queues) {
+    for (const { name, queue } of queues) {
       const failed = await queue.getFailed(0, limit);
-      failedJobs[queue.name] = failed.map(job => ({
+      failedJobs[name] = failed.map(job => ({
         id: job.id,
         name: job.name,
         data: job.data,
@@ -49,7 +49,7 @@ export async function POST(req) {
     }
 
     const queues = await getAllQueues();
-    const targetQueue = queues.find(q => q.name === queue);
+    const targetQueue = queues.find(q => q.name === queue)?.queue;
 
     if (!targetQueue) {
       return NextResponse.json(
@@ -100,7 +100,7 @@ export async function DELETE(req) {
     }
 
     const queues = await getAllQueues();
-    const targetQueue = queues.find(q => q.name === queue);
+    const targetQueue = queues.find(q => q.name === queue)?.queue;
 
     if (!targetQueue) {
       return NextResponse.json(

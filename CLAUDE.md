@@ -52,14 +52,17 @@ npm run lint          # Run Next.js linter
 pm2 start ecosystem.config.cjs        # Start all apps
 pm2 restart ecosystem.config.cjs     # Restart all apps
 pm2 logs manager                      # View main app logs
-pm2 logs manager:numberstatus        # View status sync logs
-pm2 logs manager:fetchsms            # View SMS fetch logs
-pm2 logs manager:suspendlowsms       # View SMS suspend monitor logs
-pm2 logs manager:cleanup-messages    # View message cleanup logs
-pm2 logs manager:keepalive           # View FCM keep-alive logs
+pm2 logs worker:status                # View device/number status sync logs
+pm2 logs worker:fetch                 # View SMS fetch logs
+pm2 logs worker:suspend               # View SMS suspend monitor logs
+pm2 logs worker:cleanup               # View message cleanup logs
+pm2 logs worker:keepalive             # View FCM keep-alive logs
 
-# FCM Wake-Up Service (run separately)
-pm2 start script/wakeup.mjs --name "manager:wakeup"
+# BullMQ Worker Testing
+node script/test-status-worker.mjs    # Test status worker
+node script/test-fetch-worker.mjs     # Test fetch worker
+node script/test-suspend-worker.mjs   # Test suspend worker
+node script/test-cleanup-worker.mjs   # Test cleanup worker
 
 # Create Mobile App User
 node script/create-mobile-user.mjs <email> <password> <name>
@@ -70,11 +73,39 @@ node script/create-mobile-user.mjs <email> <password> <name>
 The system runs 6 PM2 processes (configured in `ecosystem.config.cjs`):
 
 1. **manager** - Main Next.js app (`npm start`)
-2. **manager:numberstatus** - Device/number status sync script (`script/status.mjs`)
-3. **manager:fetchsms** - SMS fetch script (`script/fetch.mjs`)
-4. **manager:suspendlowsms** - SMS quality monitor (`script/suspend-low-sms.mjs`)
-5. **manager:cleanup-messages** - Message cleanup service (`script/cleanup-messages.mjs`)
-6. **manager:keepalive** - FCM keep-alive service (`script/keepalive.mjs`)
+2. **worker:status** - Device/number status sync worker (`workers/status-worker.js`)
+3. **worker:fetch** - SMS fetch worker (`workers/fetch-worker.js`)
+4. **worker:suspend** - SMS quality monitor worker (`workers/suspend-worker.js`)
+5. **worker:cleanup** - Message cleanup worker (`workers/cleanup-worker.js`)
+6. **worker:keepalive** - FCM keep-alive worker (`workers/keepalive-worker.js`)
+
+### BullMQ Architecture
+
+The workers use BullMQ with Redis for job queue management:
+
+**Queue System** (`lib/queues/`):
+- `device-status` - Device status sync and number management
+- `sms:fetch` - SMS fetching from devices
+- `quality:suspend` - SMS quality-based auto-suspend
+- `maintenance:cleanup` - Message cleanup service
+- `device:keepalive` - FCM keep-alive pings
+
+**Worker Pattern**:
+- Each worker runs independently as a PM2 process
+- Workers poll Redis for jobs using BullMQ Worker class
+- Jobs are scheduled with delays for recurring tasks
+- Failed jobs go to Dead Letter Queue (DLQ) for inspection
+
+**Job Handlers** (`jobs/handlers/`):
+- Business logic separated from worker boilerplate
+- Each handler exports a function that receives job data
+- Handlers return structured results with success/error status
+
+**Monitoring APIs**:
+- `GET /api/queues/stats` - View queue statistics (waiting, active, completed, failed)
+- `GET /api/queues/dlq` - View failed jobs across all queues
+- `POST /api/queues/dlq` - Retry a failed job (requires `queue` and `jobId` in body)
+- `DELETE /api/queues/dlq` - Remove a failed job (requires `queue` and `jobId` query params)
 
 ## Architecture
 
@@ -107,9 +138,11 @@ The system runs 6 PM2 processes (configured in `ecosystem.config.cjs`):
 - Device offline threshold: 60 seconds (to reduce status flip-flopping)
 - Call forwarding state is preserved across heartbeats (merged from existing device record)
 
-### Background Sync Script (`script/status.mjs`)
+### Background Sync (BullMQ Worker: `workers/status-worker.js`)
 
-Runs every 15 seconds via `node-cron`:
+**Replaces**: `script/status.mjs` (deprecated)
+
+Runs via BullMQ scheduling every 15 seconds:
 
 1. **Device status sync** - Marks devices online/offline based on `lastHeartbeat` (60s threshold)
 2. **Number sync** - Syncs active SIM phone numbers to `Numbers` collection
@@ -122,10 +155,15 @@ Runs every 15 seconds via `node-cron`:
 - ONLINE devices: Active SIM numbers are synced/upserted to Numbers collection
 - Numbers port format: `{deviceId}-SIM{slot}` (e.g., "1a2b3c4d-SIM1")
 - Indian phone numbers are normalized (remove "91" prefix, 10 digits)
+- Jobs self-schedule on successful completion (see `workers/status-worker.js`)
 
-### SMS Quality Monitor (`script/suspend-low-sms.mjs`)
+**Handler**: `jobs/handlers/status-handler.js` exports `handleStatusJob(data)`
 
-Runs as PM2 process `manager:suspendlowsms`:
+### SMS Quality Monitor (BullMQ Worker: `workers/suspend-worker.js`)
+
+**Replaces**: `script/suspend-low-sms.mjs` (deprecated)
+
+Runs as PM2 process `worker:suspend`:
 
 **Suspend check** (every 15 minutes):
 - Counts SMS received per number in last N hours (configurable)
@@ -145,34 +183,26 @@ Runs as PM2 process `manager:suspendlowsms`:
 - `SMS_SUSPEND_DRY_RUN` - Test mode without actual changes
 - `SMS_TEST_NUMBER` - Single number testing
 
-### FCM Wake-Up Service (`script/wakeup.mjs`)
+**Handler**: `jobs/handlers/suspend-handler.js` exports `handleSuspendJob(data)`
 
-Runs independently (not in PM2 config) to automatically wake up offline devices:
+### FCM Wake-Up Service
 
-**Behavior:**
-- Scans for devices offline beyond threshold (default: 120 seconds)
-- Sends FCM high-priority notifications to devices with valid FCM tokens
-- Tracks wake-up attempts with cooldown period (default: 5 minutes)
-- Limits attempts per cycle (default: 3) to avoid spamming
-- Cleans up old attempt records hourly
+**Status**: Removed due to Firebase ES module compatibility issues (see commit `0803cb9`).
 
-**API endpoints:**
+The wake-up service (`script/wakeup.mjs`) has been deprecated. Manual wake-up functionality may still be available via API endpoints if the Firebase integration is restored.
+
+**Previous API endpoints** (currently non-functional):
 - `POST /api/device/:deviceId/wake-up` - Manually trigger wake-up for single device
 - `POST /api/device/wake-up-all` - Trigger wake-up for all offline devices
 
-**Configuration via env vars:**
-- `FCM_SERVICE_ACCOUNT_KEY` - Path to Firebase service account key JSON file
-- `FCM_WAKE_UP_CRON` - Scan interval (default: `*/2 * * * * *` = every 2 minutes)
-- `FCM_WAKE_UP_OFFLINE_THRESHOLD` - Offline seconds before wake-up (default: 120)
-- `FCM_WAKE_UP_MAX_ATTEMPTS` - Max attempts per cycle (default: 3)
-- `FCM_WAKE_UP_COOLDOWN` - Cooldown minutes between attempts (default: 5)
-
-**Device model additions:**
+**Device model fields** (preserved for future use):
 - `fcmToken` - Firebase Cloud Messaging token for wake-up notifications
 
-### Message Cleanup Service (`script/cleanup-messages.mjs`)
+### Message Cleanup Service (BullMQ Worker: `workers/cleanup-worker.js`)
 
-Runs as PM2 process `manager:cleanup-messages`:
+**Replaces**: `script/cleanup-messages.mjs` (deprecated)
+
+Runs as PM2 process `worker:cleanup`:
 
 **Behavior:**
 - Deletes SMS messages older than retention period (default: 12 hours)
@@ -187,9 +217,13 @@ Runs as PM2 process `manager:cleanup-messages`:
 - `MESSAGE_CLEANUP_BATCH_SIZE` - Messages per batch (default: 1000)
 - `MESSAGE_CLEANUP_CRON` - Schedule interval (default: `0 */6 * * *` = every 6 hours)
 
-### FCM Keep-Alive Service (`script/keepalive.mjs`)
+**Handler**: `jobs/handlers/cleanup-handler.js` exports `handleCleanupJob(data)`
 
-Runs as PM2 process `manager:keepalive` to proactively keep devices online:
+### FCM Keep-Alive Service (BullMQ Worker: `workers/keepalive-worker.js`)
+
+**Replaces**: `script/keepalive.mjs` (deprecated)
+
+Runs as PM2 process `worker:keepalive` to proactively keep devices online:
 
 **Behavior:**
 - Scans for devices that have active orders (not just offline devices)
@@ -200,14 +234,45 @@ Runs as PM2 process `manager:keepalive` to proactively keep devices online:
 - Runs periodically (default: every 30 seconds)
 
 **Key difference from Wake-Up Service:**
-- Wake-Up: Reactive - wakes devices that are already offline
+- Wake-Up: Reactive - wakes devices that are already offline (currently removed)
 - Keep-Alive: Proactive - prevents devices with active orders from going offline
 
 **Configuration via env vars:**
-- `FCM_SERVICE_ACCOUNT_KEY` - Path to Firebase service account key JSON file (required)
 - `FCM_KEEP_ALIVE_CRON` - Scan interval (default: `*/30 * * * * *` = every 30 sec)
 - `FCM_KEEP_ALIVE_COOLDOWN` - Minutes between keep-alive attempts (default: 3)
 - `FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE` - Min heartbeat age in seconds (default: 45)
+
+**Handler**: `jobs/handlers/keepalive-handler.js` exports `handleKeepaliveJob(data)`
+
+### SMS Fetch Worker (BullMQ Worker: `workers/fetch-worker.js`)
+
+**Replaces**: `script/fetch.mjs` (deprecated)
+
+Runs as PM2 process `worker:fetch`:
+
+**Behavior:**
+- Polls active orders every 5 seconds (configurable)
+- Searches Messages collection for incoming OTP/SMS
+- Extracts OTP using service-specific regex patterns
+- Updates order status when OTP is found
+- Handles multi-use orders (services requiring multiple SMS)
+- Auto-expires orders after 15 minutes
+- Creates number locks when first OTP is received
+- Updates number quality scores based on success/failure
+
+**OTP Detection Logic:**
+- Builds regex patterns from service `formate` templates
+- Supports `{otp}`, `{date}`, `{datetime}`, `{time}`, `{random}` placeholders
+- Falls back to partial matching (last 10 digits) for edge cases
+- Keyword filtering before OTP extraction
+
+**Number Quality Impact:**
+- +5 points for successful OTP delivery
+- -15 points for "expired_no_recharge" (no SMS received)
+- No penalty for "expired_no_sms" (network issues)
+- Consecutive failures tracked for auto-suspension
+
+**Handler**: `jobs/handlers/fetch-handler.js` exports `handleFetchJob(data)`
 
 ### Number Quality Management API
 
@@ -278,18 +343,29 @@ DELETE - Soft delete (set `active: false`)
 - `/api/locks/*` - Number lock/unlock management
 - `/api/mobile/*` - Mobile app authentication (separate from web admin panel)
 - `/api/login`, `/api/register` - Web admin panel authentication
+- `/api/queues/stats` - BullMQ queue statistics monitoring
+- `/api/queues/dlq` - Dead Letter Queue management (view, retry, delete failed jobs)
 
 ## Environment Variables
 
 Required:
 - `MONGODB_URI` - MongoDB connection string
 - `JWT_SECRET` - JWT signing key
+- `REDIS_URI` - Redis connection string for BullMQ (default: `redis://localhost:6379`)
 
 Optional:
 - `PORT` - Server port (default: 3000)
+- `REDIS_DB` - Redis database number (default: 0)
 - `DEVICE_AUTO_DELETE_ENABLED` - Enable auto-delete (default: true)
 - `DEVICE_AUTO_DELETE_HOURS` - Offline hours before deletion (default: 24)
 - `MOBILE_API_KEY` - API key for mobile app (optional but recommended)
+
+**BullMQ Worker Enable/Disable:**
+- `BULLMQ_STATUS_ENABLED` - Enable status worker (default: false)
+- `BULLMQ_FETCH_ENABLED` - Enable fetch worker (default: false)
+- `BULLMQ_SUSPEND_ENABLED` - Enable suspend worker (default: false)
+- `BULLMQ_CLEANUP_ENABLED` - Enable cleanup worker (default: false)
+- `BULLMQ_KEEPALIVE_ENABLED` - Enable keepalive worker (default: false)
 
 **FCM Wake-Up (script/wakeup.mjs):**
 - `FCM_SERVICE_ACCOUNT_KEY` - Path to Firebase service account key JSON file (required for wake-up)
@@ -352,11 +428,18 @@ Optional:
    - Mobile app: Uses `/api/mobile/login` with `MobileUser` model and scopes-based permissions
    - Mobile users created with `script/create-mobile-user.mjs` cannot log in to web panel
 
-10. **FCM Wake-Up Integration**: Devices can register FCM tokens for remote wake-up when they go offline. The wake-up service (`script/wakeup.mjs`) automatically scans for offline devices and sends high-priority notifications. Devices must have valid `fcmToken` stored in the `Device` model.
+10. **BullMQ Job Queue System**: The system uses BullMQ with Redis for background job processing:
+   - All workers connect to Redis via `lib/queues/redis.js` singleton
+   - Workers are enabled via `BULLMQ_*_ENABLED` environment variables
+   - Jobs self-schedule on successful completion for recurring tasks
+   - Failed jobs are retained in DLQ for inspection via `/api/queues/dlq`
+   - Worker concurrency is configurable via `jobs/utils/job-options.js`
 
 11. **PM2 Service Management**: **NEVER automatically restart PM2 services** after making code changes. The user controls when to restart/reload services. Only report changes made and let user decide when to apply them. Do not use `pm2 restart`, `pm2 reload`, or similar commands without explicit user request.
 
 12. **Production Environment**: This application is running in production mode (`NODE_ENV=production`) via PM2. All code changes require manual PM2 restart by the user.
+
+13. **Redis Dependency**: Redis is required for BullMQ operation. Ensure Redis is running before starting workers. Connection string is configured via `REDIS_URI` (default: `redis://localhost:6379`).
 
 ## PHP Stubs API (`/var/www/html/stubs/`)
 
