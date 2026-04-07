@@ -18,6 +18,7 @@ export default function DashboardContent() {
     occupiedNumbers: number
     totalActivations: number
     lastcron: string
+    lastsync: string
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -93,13 +94,21 @@ export default function DashboardContent() {
 
       {/* Last Cron Status */}
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-2">
           <div className="flex items-center gap-3">
             <Clock className="h-5 w-5" />
-            <span className="font-medium">Last Cron Run:</span>
+            <span className="font-medium">Last OTP Fetch:</span>
             <Badge variant={isStale(data?.lastcron) ? "destructive" : "default"} className="text-sm">
               {formatIST(data?.lastcron)}
               {isStale(data?.lastcron) && " (Stale)"}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-3 pl-8">
+            <Clock className="h-5 w-5 opacity-50" />
+            <span className="font-medium">Last Device Sync:</span>
+            <Badge variant={isStale(data?.lastsync) ? "destructive" : "default"} className="text-sm">
+              {formatIST(data?.lastsync)}
+              {isStale(data?.lastsync) && " (Stale)"}
             </Badge>
           </div>
         </CardContent>

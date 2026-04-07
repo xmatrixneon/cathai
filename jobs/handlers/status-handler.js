@@ -1,33 +1,20 @@
 // jobs/handlers/status-handler.js
+import mongoose from 'mongoose';
 import Numbers from '../../models/Numbers.js';
 import Country from '../../models/Countires.js';
 import Device from '../../models/Device.js';
 import Message from '../../models/Message.js';
+import CronStatus from '../../models/Cron.js';
 
 async function getIndiaId() {
   const country = await Country.findOne({ name: "India" });
   if (!country) {
     throw new Error("India country not found in database");
   }
-  return country._id;
-}
-
-function normalizeIndianPhoneNumber(phoneNumber) {
-  // Remove all non-digit characters
-  const cleaned = phoneNumber.replace(/\D/g, '');
-
-  // If starts with 91, remove it and keep last 10 digits
-  if (cleaned.startsWith('91') && cleaned.length === 12) {
-    return cleaned.substring(2);
-  }
-
-  // If already 10 digits, return as is
-  if (cleaned.length === 10) {
-    return cleaned;
-  }
-
-  // Otherwise return original
-  return phoneNumber;
+  // Ensure we return an ObjectId, not a string
+  return country._id instanceof mongoose.Types.ObjectId
+    ? country._id
+    : new mongoose.Types.ObjectId(country._id.toString());
 }
 
 async function cleanupStaleDevices() {
@@ -50,62 +37,81 @@ async function cleanupStaleDevices() {
       return { deleted: 0, errors: 0 };
     }
 
-    console.log(`[Status] Found ${staleDevices.length} devices offline for ${AUTO_DELETE_HOURS}+ hours`);
+    console.log(`\n${'─'.repeat(55)}`);
+    console.log(`🧹 CLEANUP: Found ${staleDevices.length} device(s) offline for ${AUTO_DELETE_HOURS}+ hours`);
+    console.log(`${'─'.repeat(55)}`);
 
     let deletedCount = 0;
     let errorCount = 0;
 
     for (const device of staleDevices) {
       try {
-        await Message.deleteMany({ 'metadata.deviceId': device.deviceId });
-        await Numbers.updateMany(
+        // Delete associated messages
+        const messagesDeleted = await Message.deleteMany({ 'metadata.deviceId': device.deviceId });
+
+        // Deactivate all numbers from this device
+        const numbersDeactivated = await Numbers.updateMany(
           { port: { $regex: `^${device.deviceId}-SIM` } },
           { $set: { active: false, signal: 0 } }
         );
+
+        // Delete the device
         await Device.deleteOne({ _id: device._id });
+
         deletedCount++;
-        console.log(`[Status] Deleted device ${device.deviceId}`);
+        console.log(`🗑️ DELETED  ${device.deviceId} (${device.name || 'unnamed'})`);
+        console.log(`   Messages deleted: ${messagesDeleted.deletedCount}, Numbers deactivated: ${numbersDeactivated.modifiedCount}`);
       } catch (err) {
         errorCount++;
-        console.error(`[Status] Failed to delete device ${device.deviceId}:`, err.message);
+        console.error(`❌ Failed to delete device ${device.deviceId}: ${err.message}`);
       }
     }
 
+    console.log(`${'─'.repeat(55)}`);
+    console.log(`✅ CLEANUP DONE: Deleted ${deletedCount} device(s)${errorCount > 0 ? `, ${errorCount} error(s)` : ''}`);
+    console.log(`${'─'.repeat(55)}`);
+
     return { deleted: deletedCount, errors: errorCount };
   } catch (err) {
-    console.error('[Status] Cleanup error:', err.message);
+    console.error(`❌ CLEANUP ERROR: ${err.message}`);
     return { deleted: 0, errors: 1 };
   }
 }
 
 export async function handleStatusJob(data) {
   const startTime = Date.now();
-  let processed = 0;
   let errors = 0;
 
   try {
-    console.log('[Status] Starting device/number sync job');
+    const timestamp = new Date().toISOString();
 
-    // Device status timeout (60 seconds)
+    // 60 second timeout to reduce device status flip-flopping
     const offlineTimeout = new Date(Date.now() - 60 * 1000);
 
     const activeDevices = await Device.find({ isActive: true });
     const onlineDevices = activeDevices.filter(d => d.lastHeartbeat >= offlineTimeout);
     const offlineDevices = activeDevices.filter(d => d.lastHeartbeat < offlineTimeout);
 
-    console.log(`[Status] Devices: ${activeDevices.length} total, ${onlineDevices.length} online, ${offlineDevices.length} offline`);
+    const totalNumbersBefore = await Numbers.countDocuments();
+    const activeNumbersBefore = await Numbers.countDocuments({ active: true });
 
-    // Track stats
-    let syncedCount = 0;
-    let deactivatedCount = 0;
-    let statusChangedOnline = 0;
-    let statusChangedOffline = 0;
+    console.log(`\n${'─'.repeat(55)}`);
+    console.log(`🔄 SYNC  ${timestamp}`);
+    console.log(`${'─'.repeat(55)}`);
+    console.log(`📱 Devices   Total: ${activeDevices.length}  🟢 Online: ${onlineDevices.length}  🔴 Offline: ${offlineDevices.length}`);
+    console.log(`📋 Numbers   Total: ${totalNumbersBefore}  ✅ Active: ${activeNumbersBefore}  ❌ Inactive: ${totalNumbersBefore - activeNumbersBefore}`);
+    console.log(`${'─'.repeat(55)}`);
 
     const indiaId = await getIndiaId();
     const allDeviceNumberPorts = new Set();
     const syncedPhoneNumbers = new Set();
+    let syncedCount = 0;
+    let deactivatedCount = 0;
+    let numberChangedCount = 0;
+    let statusChangedOnline = 0;
+    let statusChangedOffline = 0;
 
-    // First pass: Update device statuses and sync online device numbers
+    // First pass: Sync all devices and track their numbers
     for (const device of activeDevices) {
       const isOnline = device.lastHeartbeat >= offlineTimeout;
       const newStatus = isOnline ? 'online' : 'offline';
@@ -115,12 +121,14 @@ export async function handleStatusJob(data) {
         await device.save();
         if (isOnline) {
           statusChangedOnline++;
+          console.log(`🟢 ONLINE   ${device.deviceId} (${device.name || 'unnamed'})`);
         } else {
           statusChangedOffline++;
+          console.log(`🔴 OFFLINE  ${device.deviceId} (${device.name || 'unnamed'})`);
         }
       }
 
-      // OFFLINE: Deactivate all numbers
+      // OFFLINE DEVICES: Deactivate all their numbers immediately
       if (!isOnline) {
         const result = await Numbers.updateMany(
           { port: { $regex: `^${device.deviceId}-SIM` }, active: true },
@@ -128,66 +136,158 @@ export async function handleStatusJob(data) {
         );
         if (result.modifiedCount > 0) {
           deactivatedCount += result.modifiedCount;
+          console.log(`🔌 DEACTIVATED ${result.modifiedCount} numbers from offline device ${device.deviceId}`);
         }
         continue;
       }
 
-      // ONLINE: Sync active SIM numbers
       for (const sim of device.sims) {
-        if (!sim.phoneNumber || !sim.isActive) continue;
+        if (sim.phoneNumber && sim.isActive) {
+          const port = `${device.deviceId}-SIM${sim.slot}`;
+          allDeviceNumberPorts.add(port);
 
-        const port = `${device.deviceId}-SIM${sim.slot}`;
-        allDeviceNumberPorts.add(port);
+          let phoneNumber = String(sim.phoneNumber).replace(/\D/g, '');
+          const originalInput = String(sim.phoneNumber);
 
-        let phoneNumber = sim.phoneNumber;
-        let isIndian = false;
+          // Validate and process phone number
+          const isValidIndianMobile = (num) => /^[6-9]\d{9}$/.test(num);
+          let invalidReason = null;
+          let finalNumber = phoneNumber;
 
-        // Check if Indian number
-        if (phoneNumber.startsWith('91') || phoneNumber.length === 10) {
-          phoneNumber = normalizeIndianPhoneNumber(phoneNumber);
-          isIndian = true;
-        }
+          // Case 1: Too short (< 10 digits)
+          if (phoneNumber.length < 10) {
+            invalidReason = `Too short (${phoneNumber.length} digits, need 10)`;
+          }
+          // Case 2: Remove 91 country code for Indian numbers
+          else if (phoneNumber.length > 10 && phoneNumber.startsWith("91")) {
+            let extracted = phoneNumber.substring(2, 12);
 
-        syncedPhoneNumbers.add(phoneNumber);
+            // If invalid, try last 10 digits as fallback
+            if (!isValidIndianMobile(extracted)) {
+              let fallback = phoneNumber.substring(phoneNumber.length - 10);
+              if (isValidIndianMobile(fallback)) {
+                extracted = fallback;
+              } else {
+                invalidReason = `Invalid Indian format (after removing 91: "${extracted}", fallback: "${fallback}")`;
+              }
+            }
 
-        // Upsert number
-        await Numbers.findOneAndUpdate(
-          { number: phoneNumber },
-          {
-            $set: {
-              number: phoneNumber,
-              port,
-              active: true,
-              locked: false,
-              operator: sim.carrier || 'Unknown',
-              signal: sim.signalStrength || 0,
-              lastRotation: new Date(),
-              country: isIndian ? indiaId : null,
+            if (!invalidReason) {
+              finalNumber = extracted;
+            }
+          }
+          // Case 3: Exactly 10 digits but invalid format
+          else if (phoneNumber.length === 10) {
+            if (!isValidIndianMobile(phoneNumber)) {
+              invalidReason = `Invalid Indian format (must start with 6-9)`;
+            }
+          }
+          // Case 4: Too long without 91 prefix
+          else {
+            invalidReason = `Too long (${phoneNumber.length} digits, expected 10)`;
+          }
+
+          // Final validation
+          if (invalidReason || !isValidIndianMobile(finalNumber)) {
+            console.log(`⚠️  INVALID  ${device.deviceId} SIM${sim.slot} → "${originalInput}"`);
+            console.log(`   Reason: ${invalidReason || 'Unknown error'}`);
+            if (finalNumber !== phoneNumber) {
+              console.log(`   Processed: "${phoneNumber}" → "${finalNumber}"`);
+            }
+            continue;
+          }
+
+          // Convert to number for storage
+          const numberValue = parseInt(finalNumber);
+          syncedPhoneNumbers.add(numberValue);
+
+          // Deactivate old number if SIM number changed on same port
+          const oldNumbers = await Numbers.find({ port, number: { $ne: numberValue }, active: true });
+          if (oldNumbers.length > 0) {
+            await Numbers.updateMany(
+              { port, number: { $ne: numberValue }, active: true },
+              { $set: { active: false, signal: 0 } }
+            );
+            oldNumbers.forEach(old => {
+              console.log(`🔄 SIM SWAP  ${old.number} → ${numberValue}  (${port})`);
+            });
+            numberChangedCount += oldNumbers.length;
+          }
+
+          await Numbers.findOneAndUpdate(
+            { number: numberValue },
+            {
+              $set: {
+                countryid: indiaId,
+                port,
+                operator: sim.carrier || null,
+                signal: isOnline ? (sim.signalStrength || 0) : 0,
+                active: isOnline,
+                lastRotation: new Date(),
+                locked: false,
+                iccid: sim.iccid || null,
+                imsi: sim.imsi || null
+              }
             },
-          },
-          { upsert: true, new: true }
-        );
-        syncedCount++;
+            { upsert: true, new: true }
+          );
+          syncedCount++;
+        }
       }
     }
 
-    // Second pass: Deactivate numbers not synced (stale cleanup)
-    const stillActiveNumbers = await Numbers.find({ active: true });
-    for (const num of stillActiveNumbers) {
-      if (!syncedPhoneNumbers.has(num.number)) {
-        await Numbers.findByIdAndUpdate(num._id, { $set: { active: false, signal: 0 } });
+    // Cleanup stale ports (only deactivate if number was NOT synced in this run)
+    const staleNumbers = await Numbers.find({
+      port: { $regex: /^.*-SIM[0-9]+$/ },
+      active: true
+    });
+
+    for (const num of staleNumbers) {
+      // Only deactivate if port is stale AND number wasn't synced
+      if (!allDeviceNumberPorts.has(num.port) && !syncedPhoneNumbers.has(num.number)) {
+        await Numbers.findByIdAndUpdate(num._id, {
+          $set: { active: false, signal: 0 }
+        });
         deactivatedCount++;
+        console.log(`🗑️  STALE    ${num.number}  (${num.port})`);
       }
     }
 
-    // Run stale device cleanup
+    const totalNumbersAfter = await Numbers.countDocuments();
+    const activeNumbersAfter = await Numbers.countDocuments({ active: true });
+    const elapsed = Date.now() - startTime;
+
+    console.log(`${'─'.repeat(55)}`);
+    console.log(`✅ DONE  (${elapsed}ms)`);
+    console.log(`   Synced:       ${syncedCount} numbers`);
+    console.log(`   Deactivated:  ${deactivatedCount} numbers`);
+    if (numberChangedCount > 0)
+      console.log(`   SIM swaps:    ${numberChangedCount} numbers replaced`);
+    if (statusChangedOnline > 0 || statusChangedOffline > 0)
+      console.log(`   Status chg:   +${statusChangedOnline} online  -${statusChangedOffline} offline`);
+    console.log(`   Numbers now:  Total: ${totalNumbersAfter}  ✅ Active: ${activeNumbersAfter}  ❌ Inactive: ${totalNumbersAfter - activeNumbersAfter}`);
+    console.log(`${'─'.repeat(55)}\n`);
+
+    // Update CronStatus for dashboard display
+    try {
+      await CronStatus.findOneAndUpdate(
+        { name: 'syncStatus' },
+        { lastRun: new Date() },
+        { upsert: true }
+      );
+      console.log('[Sync] CronStatus updated');
+    } catch (cronErr) {
+      console.error('[Sync] Failed to update CronStatus:', cronErr.message);
+    }
+
+    // Run cleanup of stale devices after sync
     const cleanupResult = await cleanupStaleDevices();
 
     return {
       success: true,
       processed: activeDevices.length,
       errors,
-      duration: Date.now() - startTime,
+      duration: elapsed,
       details: {
         devicesTotal: activeDevices.length,
         devicesOnline: onlineDevices.length,
@@ -196,15 +296,21 @@ export async function handleStatusJob(data) {
         statusChangedOffline,
         numbersSynced: syncedCount,
         numbersDeactivated: deactivatedCount,
+        numberChanged: numberChangedCount,
+        numbersBefore: totalNumbersBefore,
+        numbersAfter: totalNumbersAfter,
+        activeNumbersBefore,
+        activeNumbersAfter,
         devicesDeleted: cleanupResult.deleted,
       },
     };
   } catch (error) {
     errors++;
-    console.error('[Status] Error:', error.message);
+    console.error(`\n❌ SYNC ERROR  ${new Date().toISOString()}`);
+    console.error(`   ${error.message}\n`);
     return {
       success: false,
-      processed,
+      processed: 0,
       errors,
       duration: Date.now() - startTime,
       error: error.message,

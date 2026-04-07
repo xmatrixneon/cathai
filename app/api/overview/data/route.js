@@ -25,9 +25,18 @@ export async function GET() {
 
     // Total activations (isused = true)
     const totalActivations = await Orders.countDocuments({ isused: true });
-const cron = await CronStatus.findOne({ name: "fetchOrders" });
-    // Send raw ISO date string so frontend can format it properly
-    let lastcron = cron?.lastRun ? new Date(cron.lastRun).toISOString() : null;
+
+    // Get all cron statuses
+    const cronStatuses = await CronStatus.find({});
+    const cronMap = new Map();
+    for (const cron of cronStatuses) {
+      cronMap.set(cron.name, cron.lastRun ? new Date(cron.lastRun).toISOString() : null);
+    }
+
+    // Send raw ISO date strings so frontend can format them properly
+    let lastcron = cronMap.get("fetchOrders") || null;
+    let lastsync = cronMap.get("syncStatus") || null;
+
     // Response
     return NextResponse.json({
       totalNumbers,
@@ -35,7 +44,8 @@ const cron = await CronStatus.findOne({ name: "fetchOrders" });
       occupiedNumbers: occupied,   // unique active numbers
       availableNumbers: totalNumbers - occupied,
       totalActivations,             // orders marked as used
-      lastcron: lastcron
+      lastcron: lastcron,          // fetchOrders cron
+      lastsync: lastsync           // syncStatus cron
     });
   } catch (error) {
     console.error("Overview API error:", error);
