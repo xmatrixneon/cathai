@@ -3,7 +3,7 @@ import { getRedis } from '../../lib/queues/redis.js';
 
 // Job options configuration for each queue type
 export const jobOptions = {
-  'sms:fetch': {
+  'sms-fetch': {
     attempts: 3,
     backoff: {
       type: 'exponential',
@@ -12,7 +12,7 @@ export const jobOptions = {
     removeOnComplete: 100,
     removeOnFail: 500,
   },
-  'device:status': {
+  'device-status': {
     attempts: 3,
     backoff: {
       type: 'exponential',
@@ -21,7 +21,7 @@ export const jobOptions = {
     removeOnComplete: 50,
     removeOnFail: 250,
   },
-  'device:keepalive': {
+  'device-keepalive': {
     attempts: 2,
     backoff: {
       type: 'exponential',
@@ -30,7 +30,7 @@ export const jobOptions = {
     removeOnComplete: 50,
     removeOnFail: 200,
   },
-  'device:wakeup': {
+  'device-wakeup': {
     attempts: 1,
     backoff: {
       type: 'fixed',
@@ -39,7 +39,7 @@ export const jobOptions = {
     removeOnComplete: 100,
     removeOnFail: 100,
   },
-  'quality:suspend': {
+  'quality-suspend': {
     attempts: 2,
     backoff: {
       type: 'fixed',
@@ -48,7 +48,7 @@ export const jobOptions = {
     removeOnComplete: 20,
     removeOnFail: 100,
   },
-  'maintenance:cleanup': {
+  'maintenance-cleanup': {
     attempts: 1,
     backoff: {
       type: 'fixed',
@@ -73,12 +73,12 @@ export function getQueueOptions() {
 
 // Worker concurrency configuration from env
 export function getWorkerConcurrency(queueName, defaultConcurrency = 1) {
-  const envVar = `BULLMQ_CONCURRENCY_${queueName.replace(':', '_').toUpperCase()}`;
+  const envVar = `BULLMQ_CONCURRENCY_${queueName.replace('-', '_').toUpperCase()}`;
   return parseInt(process.env[envVar] || String(defaultConcurrency), 10);
 }
 
 // Job intervals from env (milliseconds)
 export function getJobInterval(queueName, defaultInterval) {
-  const envVar = `BULLMQ_${queueName.replace(':', '_').toUpperCase()}_INTERVAL`;
+  const envVar = `BULLMQ_${queueName.replace('-', '_').toUpperCase()}_INTERVAL`;
   return parseInt(process.env[envVar] || String(defaultInterval), 10);
 }

@@ -12,7 +12,7 @@ if (process.env.BULLMQ_SUSPEND_ENABLED !== 'true') {
   process.exit(0);
 }
 
-const worker = new Worker('quality:suspend', async (job) => {
+const worker = new Worker('quality-suspend', async (job) => {
   return withJobLogging(job, async () => {
     const result = await handleSuspendJob(job.data);
 
@@ -22,7 +22,7 @@ const worker = new Worker('quality:suspend', async (job) => {
       const nextInterval = nextType === 'suspend-check' ? SUSPEND_CHECK_INTERVAL : SUSPEND_RECOVER_INTERVAL;
 
       await suspendQueue.add(
-        'quality:suspend',
+        'quality-suspend',
         {
           type: nextType,
           subType: nextType,
@@ -38,7 +38,7 @@ const worker = new Worker('quality:suspend', async (job) => {
   });
 }, {
   connection: getRedis(),
-  concurrency: getWorkerConcurrency('quality:suspend', 1),
+  concurrency: getWorkerConcurrency('quality-suspend', 1),
 });
 
 worker.on('completed', (job) => {

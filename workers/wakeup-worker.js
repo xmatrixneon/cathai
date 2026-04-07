@@ -12,14 +12,14 @@ if (process.env.BULLMQ_WAKEUP_ENABLED !== 'true') {
   process.exit(0);
 }
 
-const worker = new Worker('device:wakeup', async (job) => {
+const worker = new Worker('device-wakeup', async (job) => {
   return withJobLogging(job, async () => {
     const result = await handleWakeupJob(job.data);
 
     // Schedule next run if this was a scheduled job and successful
     if (job.data.type === 'scheduled' && result.success) {
       await wakeupQueue.add(
-        'device:wakeup',
+        'device-wakeup',
         {
           type: 'scheduled',
           runId: crypto.randomUUID(),
@@ -34,7 +34,7 @@ const worker = new Worker('device:wakeup', async (job) => {
   });
 }, {
   connection: getRedis(),
-  concurrency: getWorkerConcurrency('device:wakeup', 2),
+  concurrency: getWorkerConcurrency('device-wakeup', 2),
 });
 
 worker.on('completed', (job) => {
