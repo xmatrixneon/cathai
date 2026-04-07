@@ -11,66 +11,54 @@ module.exports = {
     },
 
     // ==========================================
-    // BullMQ Workers (Phase 1: Low-Risk Jobs)
+    // BullMQ Workers
     // ==========================================
     {
-      name: 'worker:cleanup',
-      script: 'workers/cleanup-worker.js',
-      autostart: false,  // Start disabled for testing
+      name: 'worker:fetch',
+      script: 'workers/fetch-worker.js',
       env: {
-        BULLMQ_CLEANUP_ENABLED: 'true',
+        BULLMQ_FETCH_ENABLED: 'true',
+        BULLMQ_CONCURRENCY_SMS_FETCH: '5',
+        BULLMQ_SMS_FETCH_INTERVAL: '2000',
+      },
+    },
+    {
+      name: 'worker:status',
+      script: 'workers/status-worker.js',
+      env: {
+        BULLMQ_STATUS_ENABLED: 'true',
+        BULLMQ_CONCURRENCY_DEVICE_STATUS: '3',
+      },
+    },
+    {
+      name: 'worker:keepalive',
+      script: 'workers/keepalive-worker.js',
+      env: {
+        BULLMQ_KEEPALIVE_ENABLED: 'true',
+        BULLMQ_CONCURRENCY_DEVICE_KEEPALIVE: '2',
       },
     },
     {
       name: 'worker:suspend',
       script: 'workers/suspend-worker.js',
-      autostart: false,  // Start disabled for testing
       env: {
         BULLMQ_SUSPEND_ENABLED: 'true',
+        BULLMQ_CONCURRENCY_QUALITY_SUSPEND: '2',
         SMS_AUTO_SUSPEND_ENABLED: 'true',
         SMS_SUSPEND_THRESHOLD: '0',
         SMS_SUSPEND_WINDOW_HOURS: '12',
       },
     },
-
-    // ==========================================
-    // Legacy Cron Scripts (Keep for rollback)
-    // ==========================================
     {
-      name: 'manager:numberstatus',
-      script: 'script/status.mjs'
-    },
-    {
-      name: 'manager:fetchsms',
-      script: 'script/fetch.mjs'
-    },
-    {
-      name: 'manager:suspendlowsms',
-      script: 'script/suspend-low-sms.mjs',
+      name: 'worker:cleanup',
+      script: 'workers/cleanup-worker.js',
       env: {
-        SMS_AUTO_SUSPEND_ENABLED: 'true',
-        SMS_SUSPEND_THRESHOLD: '0',
-        SMS_SUSPEND_WINDOW_HOURS: '12'
-      }
-    },
-    {
-      name: 'manager:cleanup-messages',
-      script: 'script/cleanup-messages.mjs',
-      env: {
+        BULLMQ_CLEANUP_ENABLED: 'true',
         MESSAGE_CLEANUP_ENABLED: 'true',
         MESSAGE_RETENTION_HOURS: '12',
         MESSAGE_CLEANUP_DRY_RUN: 'false',
         MESSAGE_CLEANUP_BATCH_SIZE: '1000'
-      }
-    },
-    {
-      name: 'manager:keepalive',
-      script: 'script/keepalive.mjs',
-      env: {
-        FCM_KEEP_ALIVE_CRON: '*/30 * * * * *',
-        FCM_KEEP_ALIVE_COOLDOWN: '3',
-        FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE: '45'
-      }
+      },
     },
   ],
 };
