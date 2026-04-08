@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react"
 
-import TopNav from "./top-nav"
+import TopNav from "@/components/ui/top-nav-enhanced"
 import { useTheme } from "next-themes"
 import { useEffect, useState } from "react"
 

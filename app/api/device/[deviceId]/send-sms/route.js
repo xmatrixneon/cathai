@@ -3,6 +3,7 @@ import Device from '@/models/Device';
 import { NextResponse } from 'next/server';
 import { getWsManager } from '@/lib/websocket/manager.js';
 import { v4 as uuidv4 } from 'uuid';
+import { verify } from '@/lib/verify';
 
 /**
  * POST /api/device/[deviceId]/send-sms
@@ -28,6 +29,15 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export async function POST(request, { params }) {
   try {
+    // Authenticate request
+    const authResult = await verify(request, { requireAdmin: true });
+    if (!authResult.success) {
+      return NextResponse.json(
+        { success: false, error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     await connectDB();
 
     const { deviceId } = await params;

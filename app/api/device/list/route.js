@@ -2,9 +2,19 @@ import connectDB from '@/lib/db';
 import Device from '@/models/Device';
 import Message from '@/models/Message';
 import { NextResponse } from 'next/server';
+import { verify } from '@/lib/verify';
 
 export async function GET(request) {
   try {
+    // Authenticate request
+    const authResult = await verify(request, { requireAdmin: true });
+    if (!authResult.success) {
+      return NextResponse.json(
+        { success: false, error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     await connectDB();
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');

@@ -2,9 +2,19 @@ import { NextResponse } from 'next/server';
 import Device from '@/models/Device';
 import { sendWakeUpNotification } from '@/lib/fcm/send.js';
 import connectDB from '@/lib/db';
+import { verify } from '@/lib/verify';
 
 export async function POST(request) {
   try {
+    // Authenticate request
+    const authResult = await verify(request, { requireAdmin: true });
+    if (!authResult.success) {
+      return NextResponse.json(
+        { success: false, error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     console.log('[wake-up-all] Starting request');
     await connectDB();
     console.log('[wake-up-all] DB connected');

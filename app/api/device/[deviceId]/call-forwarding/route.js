@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
 // directly in this file was fragile (requires the global to be set first) and the
 // module-level wsManager variable was sometimes null on cold API route invocations.
 import { getWsManager } from '@/lib/websocket/manager.js';
+import { verify } from '@/lib/verify';
 
 /**
  * POST /api/device/[deviceId]/call-forwarding
@@ -22,6 +23,15 @@ import { getWsManager } from '@/lib/websocket/manager.js';
  */
 export async function POST(request, { params }) {
   try {
+    // Authenticate request
+    const authResult = await verify(request, { requireAdmin: true });
+    if (!authResult.success) {
+      return NextResponse.json(
+        { success: false, error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     await connectDB();
 
     const { deviceId } = await params;

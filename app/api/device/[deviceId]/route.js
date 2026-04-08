@@ -2,9 +2,19 @@ import connectDB from '@/lib/db';
 import Device from '@/models/Device';
 import Message from '@/models/Message';
 import { NextResponse } from 'next/server';
+import { verify } from '@/lib/verify';
 
 export async function GET(request, { params }) {
   try {
+    // Authenticate request
+    const authResult = await verify(request, { requireAdmin: true });
+    if (!authResult.success) {
+      return NextResponse.json(
+        { success: false, error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     await connectDB();
     const { deviceId } = await params;
 
@@ -45,6 +55,15 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   try {
+    // Authenticate request
+    const authResult = await verify(request, { requireAdmin: true });
+    if (!authResult.success) {
+      return NextResponse.json(
+        { success: false, error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     await connectDB();
     const { deviceId } = await params;
     const body = await request.json();
@@ -102,6 +121,15 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
+    // Authenticate request
+    const authResult = await verify(request, { requireAdmin: true });
+    if (!authResult.success) {
+      return NextResponse.json(
+        { success: false, error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     await connectDB();
     const { deviceId } = await params;
 
