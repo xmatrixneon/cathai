@@ -272,6 +272,18 @@ Runs as PM2 process `worker:fetch`:
 - No penalty for "expired_no_sms" (network issues)
 - Consecutive failures tracked for auto-suspension
 
+**Order Expiration Behavior (Important):**
+- All orders expire after 15 minutes (`active: false`)
+- Orders with `isused: true` (received OTP) **preserve their success state** during expiration
+- Successful orders keep `failureReason: 'none'` and `qualityImpact: 5` even after expiring
+- This ensures accurate number quality tracking and prevents successful orders from being marked as failures
+
+**Batch-Optimized Architecture:**
+- Fetches all recent messages in ONE query (instead of per-order queries)
+- Groups messages by receiver number in memory for fast lookup
+- Processes 70+ orders in ~50ms with minimal database load
+- Supports both exact receiver matching and partial (last 10 digits) fallback
+
 **Handler**: `jobs/handlers/fetch-handler.js` exports `handleFetchJob(data)`
 
 ### Number Quality Management API
@@ -323,6 +335,7 @@ DELETE - Soft delete (set `active: false`)
 - **Failure tracking**: `failureReason` ('none', 'expired_no_sms', 'expired_no_recharge', 'user_cancelled', 'early_cancel', 'max_messages')
 - **Quality impact**: `qualityImpact` (affects parent number's quality score)
 - **Snapshot**: `numberSnapshot` captures number state at order time
+- **Important**: `serviceid` is the `_id` (ObjectId) of the service document, not the `code` string. Use `db.services.findOne({_id: ObjectId(order.serviceid)})` for lookups.
 
 **MobileUser** (`models/MobileUser.js`):
 - `email` (unique) - Login email for mobile app
@@ -440,6 +453,8 @@ Optional:
 12. **Production Environment**: This application is running in production mode (`NODE_ENV=production`) via PM2. All code changes require manual PM2 restart by the user.
 
 13. **Redis Dependency**: Redis is required for BullMQ operation. Ensure Redis is running before starting workers. Connection string is configured via `REDIS_URI` (default: `redis://localhost:6379`).
+
+14. **Order Expiration and Success State Preservation**: All orders expire after 15 minutes regardless of success. However, orders that have successfully received an OTP (`isused: true`) must preserve their success state (`failureReason: 'none'`, `qualityImpact: 5`) during expiration. This is critical for accurate number quality tracking. The expiration logic in `jobs/handlers/fetch-handler.js` checks `order.isused` before applying expiration values.
 
 ## PHP Stubs API (`/var/www/html/stubs/`)
 
