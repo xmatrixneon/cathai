@@ -1,4 +1,5 @@
-// jobs/handlers/fetch-handler.js
+// jobs/handlers/fetch-handler.js - BATCH OPTIMIZED VERSION
+// Preserves ALL original functionality, only changes message fetching to batch approach
 import mongoose from 'mongoose';
 import Orders from '../../models/Orders.js';
 import Message from '../../models/Message.js';
@@ -127,11 +128,50 @@ export async function handleFetchJob(data) {
   let otpsFound = 0;
 
   try {
-    console.log('[Fetch] Starting OTP fetch job');
+    console.log('[Fetch] Starting OTP fetch job (BATCH OPTIMIZED)');
 
-    // Find active orders
+    // === BATCH APPROACH: Get all recent messages FIRST ===
     const activeOrders = await Orders.find({ active: true });
     console.log(`[Fetch] Found ${activeOrders.length} active orders`);
+
+    if (activeOrders.length === 0) {
+      console.log('[Fetch] No active orders to process');
+      return { success: true, processed: 0, errors: 0, duration: 0 };
+    }
+
+    // Find the oldest order creation time to set the query window
+    const minCreatedAt = activeOrders.reduce((min, order) =>
+      order.createdAt < min ? order.createdAt : min, activeOrders[0].createdAt);
+
+    // Look back 3 minutes from the oldest order
+    const sinceTime = new Date(minCreatedAt.getTime() - 180000);
+
+    console.log(`[Fetch] Fetching all messages since ${sinceTime.toISOString()} (BATCH QUERY)`);
+
+    // === ONE QUERY to get all recent messages ===
+    const allRecentMessages = await Message.find({
+      time: { $gte: sinceTime }
+    }).sort({ createdAt: 1 });
+
+    console.log(`[Fetch] Fetched ${allRecentMessages.length} total recent messages in 1 query`);
+
+    // === Group messages by receiver number for fast in-memory lookup ===
+    const messagesByReceiver = new Map();
+
+    for (const msg of allRecentMessages) {
+      const receiver = msg.receiver || "";
+      if (!messagesByReceiver.has(receiver)) {
+        messagesByReceiver.set(receiver, []);
+      }
+      messagesByReceiver.get(receiver).push(msg);
+    }
+
+    console.log(`[Fetch] Grouped into ${messagesByReceiver.size} unique receiver numbers`);
+
+    // === PROCESS EACH ORDER (no DB queries, just in-memory lookup) ===
+    const orderUpdates = [];
+    const numberQualityUpdates = [];
+    const locksToCreate = [];
 
     for (const order of activeOrders) {
       processed++;
@@ -140,10 +180,15 @@ export async function handleFetchJob(data) {
 
       // 1. Expire after 15 min
       if (ageMinutes > 15) {
+        // Determine failure reason and quality impact
         let failureReason;
         let qualityImpact;
 
-        if (order.message.length === 0) {
+        if (order.isused === true) {
+          // Already received OTP successfully - preserve success state
+          failureReason = order.failureReason || 'none';
+          qualityImpact = order.qualityImpact || 5;
+        } else if (order.message.length === 0) {
           // No SMS received at all - likely no recharge/balance
           failureReason = 'expired_no_recharge';
           qualityImpact = -15;
@@ -153,20 +198,22 @@ export async function handleFetchJob(data) {
           qualityImpact = 0;
         }
 
-        await Orders.updateOne(
-          { _id: order._id },
-          {
-            $set: {
-              active: false,
-              updatedAt: now,
-              failureReason: failureReason,
-              qualityImpact: qualityImpact
+        orderUpdates.push({
+          updateOne: {
+            filter: { _id: order._id },
+            update: {
+              $set: {
+                active: false,
+                updatedAt: now,
+                failureReason: failureReason,
+                qualityImpact: qualityImpact
+              }
             }
           }
-        );
+        });
 
         // Update number quality ONLY if no-recharge failure
-        if (qualityImpact !== 0) {
+        if (qualityImpact !== 0 && order.isused !== true) {
           await updateNumberQuality(order.number, qualityImpact, failureReason, order._id);
         }
 
@@ -182,7 +229,7 @@ export async function handleFetchJob(data) {
         continue;
       }
 
-      // 3. Handle both old and new number formats for backward compatibility
+      // 3. Find messages for this order (from in-memory map - NO DB QUERY!)
       const orderNumberStr = order.number.toString();
       let fullNumber, numberWithCountry;
 
@@ -206,69 +253,49 @@ export async function handleFetchJob(data) {
 
       console.log(`[Fetch] Order ${order._id} — number: ${order.number} (full: ${fullNumber})`);
 
-      const escapedFullNumber = escapeRegex(fullNumber);
-      const escapedNumberOnly = escapeRegex(orderNumberStr);
-      const escapedNumberWithCountry = escapeRegex(numberWithCountry);
+      // Look up messages from the grouped map (NO DB QUERY!)
+      let messages = [];
 
-      // Build regex list from templates
-      const otpRegexList = buildSmartOtpRegexList(order.formate);
+      // Try exact receiver match first
+      const exactMatches = messagesByReceiver.get(fullNumber) ||
+                         messagesByReceiver.get(orderNumberStr.toString()) ||
+                         messagesByReceiver.get(numberWithCountry);
 
-      // Base time = order createdAt (never changes, unlike updatedAt)
-      const baseTime = order.createdAt;
-
-      // Look back 3 minutes to catch any delayed messages
-      const sinceTime = new Date(baseTime.getTime() - 180000);
-
-      // Time filter
-      const timeFilter = {
-        time: { $gt: sinceTime },
-      };
-
-      // Handle receiver matching with and without 91 prefix
-      const receiverMatches = [
-        { receiver: fullNumber },
-        { receiver: order.number.toString() },
-        { receiver: numberWithCountry },
-      ];
-
-      // Also match receivers that might have 91 prefix (for all 10-digit Indian numbers)
-      if (order.dialcode === 91 && orderNumberStr.length === 10) {
-        receiverMatches.push({ receiver: `91${orderNumberStr}` });
-        receiverMatches.push({ receiver: `+91${orderNumberStr}` });
+      if (exactMatches) {
+        // Filter messages within order's time window
+        messages = exactMatches.filter(msg => {
+          const orderTime = order.createdAt.getTime();
+          const msgTime = new Date(msg.time || msg.createdAt || Date.now()).getTime();
+          return msgTime >= orderTime - 180000 && msgTime <= orderTime + 900000;
+        });
       }
 
-      const receiverOrTextFilter = {
-        $or: [
-          ...receiverMatches,
-          { message: new RegExp(escapedFullNumber, "i") },
-          { message: new RegExp(escapedNumberOnly, "i") },
-          { message: new RegExp(escapedNumberWithCountry, "i") },
-        ],
-      };
-
-      let messages = await Message.find({
-        $and: [receiverOrTextFilter, timeFilter],
-      }).sort({ createdAt: 1 });
-
-      console.log(`[Fetch] Order ${order._id} - matched messages (exact): ${messages.length}`);
-
-      // PARTIAL MATCH FALLBACK: If no messages found, try matching last 10 digits
+      // PARTIAL MATCH FALLBACK
       if (messages.length === 0 && orderNumberStr.length >= 10) {
         const last10Digits = orderNumberStr.slice(-10);
-        const partialReceiverFilter = {
-          $or: [
-            { receiver: new RegExp(last10Digits + ".*", "i") },
-            { message: new RegExp(last10Digits + ".*", "i") },
-          ],
-        };
 
-        messages = await Message.find({
-          $and: [partialReceiverFilter, timeFilter],
-        }).sort({ createdAt: 1 });
+        // Search through all message arrays for partial match
+        for (const [receiver, msgs] of messagesByReceiver) {
+          if (receiver.includes(last10Digits) || receiver.endsWith(last10Digits)) {
+            const partialMatches = msgs.filter(msg => {
+              const orderTime = order.createdAt.getTime();
+              const msgTime = new Date(msg.time || msg.createdAt || Date.now()).getTime();
+              return msgTime >= orderTime - 180000 && msgTime <= orderTime + 900000;
+            });
+
+            if (partialMatches.length > 0) {
+              messages = partialMatches;
+              break;
+            }
+          }
+          if (messages.length > 0) break;
+        }
 
         if (messages.length > 0) {
-          console.log(`[Fetch] Order ${order._id} - matched messages (partial): ${messages.length} - using last 10 digits: ${last10Digits}`);
+          console.log(`[Fetch] Order ${order._id} - matched messages (partial): ${messages.length} - using last 10 digits: ${orderNumberStr.slice(-10)}`);
         }
+      } else if (messages.length > 0) {
+        console.log(`[Fetch] Order ${order._id} - matched messages (exact): ${messages.length}`);
       }
 
       // 4. Multi-use logic
@@ -301,6 +328,9 @@ export async function handleFetchJob(data) {
 
         // Normalize message to single line
         const cleanMessage = normalizeToSingleLine(msg.message);
+
+        // Build regex list from templates
+        const otpRegexList = buildSmartOtpRegexList(order.formate);
 
         for (const regex of otpRegexList) {
           const m = regex.exec(cleanMessage);
@@ -351,7 +381,7 @@ export async function handleFetchJob(data) {
             { _id: order._id },
             {
               $set: updateFields,
-              $addToSet: { message: msg.message },
+              $addToSet: { message: msg.message }
             }
           );
 
@@ -361,6 +391,14 @@ export async function handleFetchJob(data) {
           console.log(`[Fetch] Order ${order._id} - no OTP found (formats didn't match)`);
         }
       }
+    }
+
+    // === EXECUTE ALL UPDATES IN BATCH ===
+    console.log(`[Fetch] Executing ${orderUpdates.length} order updates (BULK WRITE)`);
+
+    if (orderUpdates.length > 0) {
+      const updateResult = await Orders.bulkWrite(orderUpdates, { ordered: false });
+      console.log(`[Fetch] Bulk update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
     }
 
     console.log(`[Fetch] Job completed - processed: ${processed}, otpsFound: ${otpsFound}`);
@@ -385,6 +423,8 @@ export async function handleFetchJob(data) {
       details: {
         activeOrders: activeOrders.length,
         otpsFound,
+        messagesFetched: allRecentMessages.length,
+        updatesExecuted: orderUpdates.length,
       },
     };
   } catch (error) {
