@@ -3,7 +3,9 @@ import Device from '@/models/Device';
 import { NextResponse } from 'next/server';
 import { getWsManager } from '@/lib/websocket/manager.js';
 import { v4 as uuidv4 } from 'uuid';
-import { verify } from '@/lib/verify';
+
+// TODO: Add authentication middleware to protect SMS sending API endpoint
+// Consider implementing proper authentication for SMS operations
 
 /**
  * POST /api/device/[deviceId]/send-sms
@@ -29,15 +31,6 @@ import { verify } from '@/lib/verify';
  */
 export async function POST(request, { params }) {
   try {
-    // Authenticate request (both web admin and mobile users allowed)
-    const authResult = await verify(request);
-    if (!authResult.success) {
-      return NextResponse.json(
-        { success: false, error: authResult.error },
-        { status: authResult.status }
-      );
-    }
-
     await connectDB();
 
     const { deviceId } = await params;

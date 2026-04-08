@@ -16,19 +16,12 @@
 import { NextResponse } from 'next/server';
 import Device from '@/models/Device';
 import { sendWakeUpNotification } from '@/lib/fcm/send.js';
-import { verify } from '@/lib/verify';
+
+// TODO: Add authentication middleware to protect device wake-up API endpoint
+// Consider implementing proper authentication for device management operations
 
 export async function POST(request, { params }) {
   try {
-    // Authenticate request (both web admin and mobile users allowed)
-    const authResult = await verify(request);
-    if (!authResult.success) {
-      return NextResponse.json(
-        { success: false, error: authResult.error },
-        { status: authResult.status }
-      );
-    }
-
     // Await params as required by Next.js 15
     const { deviceId } = await params;
 

@@ -2,19 +2,12 @@ import connectDB from '@/lib/db';
 import Device from '@/models/Device';
 import Message from '@/models/Message';
 import { NextResponse } from 'next/server';
-import { verify } from '@/lib/verify';
+
+// TODO: Add authentication middleware to protect device stats API endpoint
+// Consider implementing proper authentication for statistics access
 
 export async function GET(request) {
   try {
-    // Authenticate request (both web admin and mobile users allowed)
-    const authResult = await verify(request);
-    if (!authResult.success) {
-      return NextResponse.json(
-        { success: false, error: authResult.error },
-        { status: authResult.status }
-      );
-    }
-
     await connectDB();
 
     const { searchParams } = new URL(request.url);

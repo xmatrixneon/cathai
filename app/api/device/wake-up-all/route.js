@@ -2,19 +2,12 @@ import { NextResponse } from 'next/server';
 import Device from '@/models/Device';
 import { sendWakeUpNotification } from '@/lib/fcm/send.js';
 import connectDB from '@/lib/db';
-import { verify } from '@/lib/verify';
+
+// TODO: Add authentication middleware to protect bulk wake-up API endpoint
+// Consider implementing proper authentication for device management operations
 
 export async function POST(request) {
   try {
-    // Authenticate request (both web admin and mobile users allowed)
-    const authResult = await verify(request);
-    if (!authResult.success) {
-      return NextResponse.json(
-        { success: false, error: authResult.error },
-        { status: authResult.status }
-      );
-    }
-
     console.log('[wake-up-all] Starting request');
     await connectDB();
     console.log('[wake-up-all] DB connected');
