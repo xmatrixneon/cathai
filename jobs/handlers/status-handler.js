@@ -201,15 +201,17 @@ export async function handleStatusJob(data) {
           const numberValue = parseInt(finalNumber);
           syncedPhoneNumbers.add(numberValue);
 
-          // Deactivate old number if SIM number changed on same port
-          const oldNumbers = await Numbers.find({ port, number: { $ne: numberValue }, active: true });
+          // Deactivate ALL old numbers on this port (including inactive ones)
+          // This prevents duplicates when number format changes (e.g., with/without 91 prefix)
+          const oldNumbers = await Numbers.find({ port, number: { $ne: numberValue } });
           if (oldNumbers.length > 0) {
             await Numbers.updateMany(
-              { port, number: { $ne: numberValue }, active: true },
+              { port, number: { $ne: numberValue } },
               { $set: { active: false, signal: 0 } }
             );
             oldNumbers.forEach(old => {
-              console.log(`🔄 SIM SWAP  ${old.number} → ${numberValue}  (${port})`);
+              const wasActive = old.active ? ' (was active)' : ' (was inactive)';
+              console.log(`🔄 CLEANUP  ${old.number}${wasActive} → ${numberValue}  (${port})`);
             });
             numberChangedCount += oldNumbers.length;
           }
