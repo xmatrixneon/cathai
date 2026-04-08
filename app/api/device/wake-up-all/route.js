@@ -36,26 +36,43 @@ export async function POST(request) {
     let failCount = 0;
     const results = [];
 
-    // Send wake-up to each device
-    console.log('[wake-up-all] Starting to send notifications to', offlineDevices.length, 'devices');
-    for (let i = 0; i < offlineDevices.length; i++) {
-      const device = offlineDevices[i];
-      if (i % 10 === 0) {
-        console.log(`[wake-up-all] Progress: ${i}/${offlineDevices.length} devices processed`);
-      }
-      const success = await sendWakeUpNotification(device.deviceId, device.fcmToken);
-      results.push({
-        deviceId: device.deviceId,
-        name: device.name,
-        success
+    // Send wake-up in batches (parallel processing)
+    const batchSize = 50; // Process 50 devices at a time
+    console.log(`[wake-up-all] Starting parallel batch processing (batch size: ${batchSize})`);
+
+    for (let i = 0; i < offlineDevices.length; i += batchSize) {
+      const batch = offlineDevices.slice(i, i + batchSize);
+      const batchNumber = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(offlineDevices.length / batchSize);
+
+      console.log(`[wake-up-all] Batch ${batchNumber}/${totalBatches}: Processing ${batch.length} devices...`);
+
+      // Process batch in parallel
+      const batchResults = await Promise.all(
+        batch.map(async (device) => {
+          const success = await sendWakeUpNotification(device.deviceId, device.fcmToken);
+          return {
+            deviceId: device.deviceId,
+            name: device.name,
+            success
+          };
+        })
+      );
+
+      // Count results
+      batchResults.forEach(result => {
+        results.push(result);
+        if (result.success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
       });
-      if (success) {
-        successCount++;
-      } else {
-        failCount++;
-      }
+
+      console.log(`[wake-up-all] Batch ${batchNumber}/${totalBatches} complete: ${batchResults.filter(r => r.success).length} success, ${batchResults.filter(r => !r.success).length} failed`);
     }
-    console.log('[wake-up-all] Completed sending notifications');
+
+    console.log('[wake-up-all] All batches completed');
 
     return NextResponse.json({
       success: true,

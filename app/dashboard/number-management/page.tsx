@@ -194,8 +194,11 @@ export default function NumberManagement() {
   };
 
   const renderSignal = (sig: number) => {
-    if (!sig || sig === 0)
+    // Handle undefined/null/0 as "No Signal"
+    if (sig === null || sig === undefined || sig === 0) {
       return <Badge variant="outline"><Signal className="h-3 w-3 mr-1" />No Signal</Badge>;
+    }
+    // Display signal strength
     const variant = sig < 8 ? "destructive" : sig < 12 ? "secondary" : "default";
     return (
       <Badge variant={variant} className="gap-1">

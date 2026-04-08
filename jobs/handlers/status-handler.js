@@ -231,7 +231,10 @@ export async function handleStatusJob(data) {
                 imsi: sim.imsi || null
               }
             },
-            { upsert: true, new: true }
+            {
+              upsert: true,
+              new: true
+            }
           );
           syncedCount++;
         }
