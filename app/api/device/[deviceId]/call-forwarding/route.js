@@ -23,8 +23,8 @@ import { verify } from '@/lib/verify';
  */
 export async function POST(request, { params }) {
   try {
-    // Authenticate request
-    const authResult = await verify(request, { requireAdmin: true });
+    // Authenticate request (both web admin and mobile users allowed)
+    const authResult = await verify(request);
     if (!authResult.success) {
       return NextResponse.json(
         { success: false, error: authResult.error },
