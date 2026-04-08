@@ -33,12 +33,15 @@ export async function GET(request) {
       }
     }
 
-    const messages = await Message.find(query)
-      .sort({ time: -1 })
-      .limit(limit)
-      .select('-__v');
-
-    const total = await Message.countDocuments(query);
+    // Parallelize queries and add lean() for better performance
+    const [messages, total] = await Promise.all([
+      Message.find(query)
+        .sort({ time: -1 })
+        .limit(limit)
+        .select('-__v')
+        .lean(),
+      Message.countDocuments(query)
+    ]);
 
     return NextResponse.json({
       success: true,

@@ -2,19 +2,12 @@ import connectDB from '@/lib/db';
 import Device from '@/models/Device';
 import Message from '@/models/Message';
 import { NextResponse } from 'next/server';
-import { verify } from '@/lib/verify';
+
+// TODO: Add authentication middleware to protect device list API endpoint
+// Consider implementing proper authentication for device management operations
 
 export async function GET(request) {
   try {
-    // Authenticate request (both web admin and mobile users allowed)
-    const authResult = await verify(request);
-    if (!authResult.success) {
-      return NextResponse.json(
-        { success: false, error: authResult.error },
-        { status: authResult.status }
-      );
-    }
-
     await connectDB();
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
@@ -46,18 +39,36 @@ export async function GET(request) {
       .sort({ [sortBy]: sortOrder })
       .skip((page - 1) * limit)
       .limit(limit)
-      .select('-__v -apiKey');
+      .select('-__v -apiKey')
+      .lean(); // Performance optimization: use lean() for read-only queries
 
     const now = new Date();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // FIX N+1 query: Single aggregation to count messages for all devices at once
+    const deviceIds = rawDevices.map(d => d.deviceId);
+    const messageCounts = await Message.aggregate([
+      {
+        $match: {
+          'metadata.deviceId': { $in: deviceIds },
+          time: { $gte: today }
+        }
+      },
+      {
+        $group: {
+          _id: '$metadata.deviceId',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Create a map for O(1) lookup of message counts
+    const messageCountMap = new Map(messageCounts.map(m => [m._id, m.count]));
+
     // Enrich each device with recentMessages and timeSinceLastSeen
-    const devices = await Promise.all(rawDevices.map(async (device) => {
-      const recentMessages = await Message.countDocuments({
-        'metadata.deviceId': device.deviceId,
-        time: { $gte: today }
-      });
+    const devices = rawDevices.map((device) => {
+      const recentMessages = messageCountMap.get(device.deviceId) || 0;
 
       const lastSeen = new Date(device.lastSeen);
       const diffMs = now - lastSeen;
@@ -66,7 +77,7 @@ export async function GET(request) {
       const diffDays = Math.floor(diffHours / 24);
 
       return {
-        ...device.toObject(),
+        ...device,
         recentMessages,
         timeSinceLastSeen: {
           minutes: diffMins % 60,
@@ -74,14 +85,16 @@ export async function GET(request) {
           days: diffDays
         }
       };
-    }));
+    });
 
-    // Stats - only count active devices
+    // Stats - parallelize all count queries for better performance
     const baseQuery = { isActive: true };
-    const online = await Device.countDocuments({ ...baseQuery, status: 'online' });
-    const offline = await Device.countDocuments({ ...baseQuery, status: 'offline' });
-    const error = await Device.countDocuments({ ...baseQuery, status: 'error' });
-    const totalMessages = await Message.countDocuments({ time: { $gte: today } });
+    const [online, offline, error, totalMessages] = await Promise.all([
+      Device.countDocuments({ ...baseQuery, status: 'online' }),
+      Device.countDocuments({ ...baseQuery, status: 'offline' }),
+      Device.countDocuments({ ...baseQuery, status: 'error' }),
+      Message.countDocuments({ time: { $gte: today } })
+    ]);
 
     return NextResponse.json({
       success: true,

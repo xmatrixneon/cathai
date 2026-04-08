@@ -1,11 +1,13 @@
 // jobs/handlers/suspend-handler.js
 import mongoose from 'mongoose';
 import Numbers from '../../models/Numbers.js';
+import Message from '../../models/Message.js';
 
 // Configuration
 const SMS_AUTO_SUSPEND_ENABLED = process.env.SMS_AUTO_SUSPEND_ENABLED !== 'false';
 const SMS_SUSPEND_ORDER_THRESHOLD = parseInt(process.env.SMS_SUSPEND_ORDER_THRESHOLD || '10');
 const SMS_SUSPEND_WINDOW_HOURS = parseInt(process.env.SMS_SUSPEND_WINDOW_HOURS || '24');
+const SMS_SUSPEND_INACTIVITY_DAYS = parseInt(process.env.SMS_SUSPEND_INACTIVITY_DAYS || '7'); // NEW: Days of inactivity before suspend
 const SMS_SUSPEND_DRY_RUN = process.env.SMS_SUSPEND_DRY_RUN === 'true';
 const SMS_TEST_NUMBER = process.env.SMS_TEST_NUMBER ? parseInt(process.env.SMS_TEST_NUMBER) : null;
 
@@ -20,10 +22,11 @@ async function suspendLowSmsNumbers() {
   console.log(`🔍 ORDER SUSPEND CHECK  ${timestamp}`);
   console.log(`${'═'.repeat(60)}`);
   console.log(`⚙️  Config:`);
-  console.log(`   Order threshold: ${SMS_SUSPEND_ORDER_THRESHOLD}+ orders`);
-  console.log(`   Time window:     ${SMS_SUSPEND_WINDOW_HOURS} hours`);
-  console.log(`   Condition:       ALL orders must have 0 SMS`);
-  console.log(`   Dry run:         ${SMS_SUSPEND_DRY_RUN ? 'YES' : 'NO'}`);
+  console.log(`   Order threshold:      ${SMS_SUSPEND_ORDER_THRESHOLD}+ orders`);
+  console.log(`   Time window:          ${SMS_SUSPEND_WINDOW_HOURS} hours`);
+  console.log(`   Inactivity days:     ${SMS_SUSPEND_INACTIVITY_DAYS}+ days`);
+  console.log(`   Condition:            ALL orders have 0 SMS AND no messages for ${SMS_SUSPEND_INACTIVITY_DAYS}+ days`);
+  console.log(`   Dry run:              ${SMS_SUSPEND_DRY_RUN ? 'YES' : 'NO'}`);
   console.log(`${'═'.repeat(60)}`);
 
   try {
@@ -70,6 +73,10 @@ async function suspendLowSmsNumbers() {
 
     let suspendedCount = 0;
     let skippedCount = 0;
+    let inactivitySkippedCount = 0;
+
+    // Calculate inactivity cutoff date
+    const inactivityCutoffDate = new Date(Date.now() - SMS_SUSPEND_INACTIVITY_DAYS * 24 * 60 * 60 * 1000);
 
     for (const item of numbersToSuspend) {
       const numberRecord = await Numbers.findOne({ number: item._id, active: true, suspended: false });
@@ -79,7 +86,21 @@ async function suspendLowSmsNumbers() {
         continue;
       }
 
-      console.log(`⚠️  SUSPEND: ${item._id} → ${item.totalOrders} orders, 0 SMS (threshold: ${SMS_SUSPEND_ORDER_THRESHOLD} orders)`);
+      // NEW: Check last message received time for this number
+      const lastMessage = await Message.findOne({ receiver: item._id.toString() }).sort({ time: -1 });
+      const lastMessageTime = lastMessage ? lastMessage.time : null;
+
+      // Skip if number received a message recently (within inactivity period)
+      if (lastMessageTime && lastMessageTime > inactivityCutoffDate) {
+        const daysSinceLastMessage = Math.floor((Date.now() - lastMessageTime.getTime()) / (24 * 60 * 60 * 1000));
+        console.log(`⏸️  SKIP: ${item._id} → ${item.totalOrders} orders, 0 SMS, but last message ${daysSinceLastMessage} days ago (within ${SMS_SUSPEND_INACTIVITY_DAYS} day threshold)`);
+        inactivitySkippedCount++;
+        continue;
+      }
+
+      const daysInactive = lastMessageTime ? Math.floor((Date.now() - lastMessageTime.getTime()) / (24 * 60 * 60 * 1000)) : 'Unknown';
+
+      console.log(`⚠️  SUSPEND: ${item._id} → ${item.totalOrders} orders, 0 SMS, inactive for ${daysInactive}+ days`);
 
       if (!SMS_SUSPEND_DRY_RUN) {
         await Numbers.findByIdAndUpdate(numberRecord._id, {
@@ -167,16 +188,18 @@ async function suspendLowSmsNumbers() {
 
     console.log(`${'═'.repeat(60)}`);
     console.log(`✅ DONE  (${elapsed}ms)`);
-    console.log(`   Checked:      ${numbersToSuspend.length} numbers meeting criteria`);
-    console.log(`   Suspended:    ${suspendedCount} numbers`);
-    console.log(`   Recovered:    ${recoveredCount} numbers`);
-    console.log(`   Skipped:      ${skippedCount} numbers (already suspended or inactive)`);
+    console.log(`   Checked:          ${numbersToSuspend.length} numbers meeting order criteria`);
+    console.log(`   Suspended:        ${suspendedCount} numbers`);
+    console.log(`   Skipped (recent): ${inactivitySkippedCount} numbers (received message recently)`);
+    console.log(`   Skipped (other):   ${skippedCount} numbers (already suspended or inactive)`);
+    console.log(`   Recovered:        ${recoveredCount} numbers`);
     console.log(`${'═'.repeat(60)}\n`);
 
     return {
       suspended: suspendedCount,
       recovered: recoveredCount,
       skipped: skippedCount,
+      inactivitySkipped: inactivitySkippedCount,
       elapsed
     };
 

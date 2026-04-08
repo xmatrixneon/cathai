@@ -36,25 +36,40 @@ interface ActiveOrder {
   updatedAt: string
 }
 
+interface ActiveOrdersResponse {
+  orders: ActiveOrder[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+  }
+}
+
 export default function ActiveOrdersPage() {
   const [orders, setOrders] = useState<ActiveOrder[]>([])
   const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const perPage = 30
   const token = getCookie("token")
 
-  async function fetchOrders() {
+  async function fetchOrders(page: number = currentPage) {
     try {
       setRefreshing(true)
-      const res = await fetch("/api/overview/active-orders", {
+      const res = await fetch(`/api/overview/active-orders?page=${page}&limit=${perPage}`, {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
       })
-      const data: ActiveOrder[] = await res.json()
-      setOrders(data)
+      const data: ActiveOrdersResponse = await res.json()
+      setOrders(data.orders)
+      setTotalPages(data.pagination.totalPages)
+      setTotal(data.pagination.total)
+      setCurrentPage(data.pagination.page)
     } catch (err) {
       console.error("Error fetching active orders:", err)
     } finally {
@@ -64,16 +79,10 @@ export default function ActiveOrdersPage() {
   }
 
   useEffect(() => {
-    fetchOrders()
-    const interval = setInterval(fetchOrders, 5000) // Auto-refresh every 5s
+    fetchOrders(1)
+    const interval = setInterval(() => fetchOrders(currentPage), 15000) // Auto-refresh every 15s (reduced from 5s)
     return () => clearInterval(interval)
-  }, [])
-
-  const totalPages = Math.ceil(orders.length / perPage)
-  const paginatedOrders = orders.slice(
-    (currentPage - 1) * perPage,
-    currentPage * perPage
-  )
+  }, [currentPage])
 
   return (
     <div className="space-y-6">
@@ -101,7 +110,7 @@ export default function ActiveOrdersPage() {
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle>Orders Overview</CardTitle>
           <Badge variant="outline" className="text-xs">
-            Auto-refreshing every 5s
+            Auto-refreshing every 15s
           </Badge>
         </CardHeader>
         <CardContent>
@@ -172,13 +181,15 @@ export default function ActiveOrdersPage() {
               {/* Pagination */}
               <div className="flex flex-col md:flex-row justify-between items-center gap-3 mt-6">
                 <div className="text-sm text-muted-foreground">
-                  Page <span className="font-medium">{currentPage}</span> of{" "}
+                  Showing <span className="font-medium">{orders.length}</span> of{" "}
+                  <span className="font-medium">{total}</span> orders • Page{" "}
+                  <span className="font-medium">{currentPage}</span> of{" "}
                   <span className="font-medium">{totalPages}</span>
                 </div>
                 <div className="flex gap-2">
                   <Button
                     disabled={currentPage === 1}
-                    onClick={() => setCurrentPage(prev => prev - 1)}
+                    onClick={() => fetchOrders(currentPage - 1)}
                     variant="outline"
                     size="sm"
                   >
@@ -186,7 +197,7 @@ export default function ActiveOrdersPage() {
                   </Button>
                   <Button
                     disabled={currentPage === totalPages}
-                    onClick={() => setCurrentPage(prev => prev + 1)}
+                    onClick={() => fetchOrders(currentPage + 1)}
                     size="sm"
                   >
                     Next

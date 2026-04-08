@@ -1,7 +1,7 @@
 // app/api/overview/active-orders/route.js
 import { NextResponse } from "next/server";
-import Orders from "@/models/Orders"; 
-import Services from "@/models/Service"; 
+import Orders from "@/models/Orders";
+import Services from "@/models/Service";
 import dbConnect from "@/lib/db";
 import { verify } from "@/lib/verify"
 
@@ -15,10 +15,22 @@ export async function GET(req) {
     } catch (err) {
       return NextResponse.json({ error: err.error }, { status: err.status || 401 })
     }
-    // Fetch active orders
-    const activeOrders = await Orders.find({ active: true })
-      .sort({ createdAt: -1 })
-      .lean();
+
+    // Parse pagination parameters
+    const { searchParams } = new URL(req.url);
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = Math.min(parseInt(searchParams.get('limit') || '30'), 100); // Max 100 per page
+    const skip = (page - 1) * limit;
+
+    // Fetch active orders with server-side pagination
+    const [activeOrders, total] = await Promise.all([
+      Orders.find({ active: true })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Orders.countDocuments({ active: true })
+    ]);
 
     // Fetch service names in bulk
     const serviceIds = activeOrders.map(o => o.serviceid).filter(Boolean);
@@ -39,7 +51,7 @@ export async function GET(req) {
       });
     };
 
-    const result = activeOrders.map(order => ({
+    const orders = activeOrders.map(order => ({
       id: order._id,
       number: order.number,
       serviceName: order.serviceid
@@ -56,7 +68,17 @@ export async function GET(req) {
       updatedAt: toIST(order.updatedAt)
     }));
 
-    return NextResponse.json(result);
+    const totalPages = Math.ceil(total / limit);
+
+    return NextResponse.json({
+      orders,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages
+      }
+    });
   } catch (error) {
     console.error("Active Orders API error:", error);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

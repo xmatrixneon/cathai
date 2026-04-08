@@ -3,11 +3,12 @@ import { NextResponse } from "next/server";
 import Orders from "@/models/Orders";
 import dbConnect from "@/lib/db";
 import { verify } from "@/lib/verify"
+import { getCached } from "@/lib/cache"
 
 export async function GET(req) {
   try {
     await dbConnect();
-try {
+    try {
       await verify(req)
     } catch (err) {
       return NextResponse.json({ error: err.error }, { status: err.status || 401 })
@@ -25,48 +26,57 @@ try {
     // Convert back to UTC for Mongo query
     const sevenDaysAgoUTC = new Date(sevenDaysAgoIST.getTime() - istOffset);
 
-    const stats = await Orders.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: sevenDaysAgoUTC }
-        }
-      },
-      {
-        $group: {
-          _id: {
-            year: { $year: { date: "$createdAt", timezone: "Asia/Kolkata" } },
-            month: { $month: { date: "$createdAt", timezone: "Asia/Kolkata" } },
-            day: { $dayOfMonth: { date: "$createdAt", timezone: "Asia/Kolkata" } }
-          },
-          totalSuccessOrders: {
-            $sum: { $cond: [{ $eq: ["$isused", true] }, 1, 0] }
-          },
-          totalUnsuccessOrders: {
-            $sum: { $cond: [{ $eq: ["$isused", false] }, 1, 0] }
-          },
-          usedNumbersSet: { $addToSet: "$number" }
-        }
-      },
-      {
-        $addFields: {
-          usedNumbers: { $size: "$usedNumbersSet" }
-        }
-      },
-      { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } }
-    ]);
+    // Use date-based cache key for auto-expiration
+    const todayKey = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const cacheKey = `dashboard:chart:7days:${todayKey}`;
 
-    const result = stats.map(item => {
-      // Construct IST date
-      const date = new Date(Date.UTC(item._id.year, item._id.month - 1, item._id.day));
-      return {
-        date: date.toISOString().split("T")[0], // YYYY-MM-DD
-        totalSuccessOrders: item.totalSuccessOrders,
-        totalUnsuccessOrders: item.totalUnsuccessOrders,
-        usedNumbers: item.usedNumbers
-      };
-    });
+    const data = await getCached(cacheKey, async () => {
+      const stats = await Orders.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: sevenDaysAgoUTC }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: { date: "$createdAt", timezone: "Asia/Kolkata" } },
+              month: { $month: { date: "$createdAt", timezone: "Asia/Kolkata" } },
+              day: { $dayOfMonth: { date: "$createdAt", timezone: "Asia/Kolkata" } }
+            },
+            totalSuccessOrders: {
+              $sum: { $cond: [{ $eq: ["$isused", true] }, 1, 0] }
+            },
+            totalUnsuccessOrders: {
+              $sum: { $cond: [{ $eq: ["$isused", false] }, 1, 0] }
+            },
+            usedNumbersSet: { $addToSet: "$number" }
+          }
+        },
+        {
+          $addFields: {
+            usedNumbers: { $size: "$usedNumbersSet" }
+          }
+        },
+        { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } }
+      ]);
 
-    return NextResponse.json(result);
+      const result = stats.map(item => {
+        // Construct IST date
+        const date = new Date(Date.UTC(item._id.year, item._id.month - 1, item._id.day));
+        return {
+          date: date.toISOString().split("T")[0], // YYYY-MM-DD
+          totalSuccessOrders: item.totalSuccessOrders,
+          totalUnsuccessOrders: item.totalUnsuccessOrders,
+          usedNumbers: item.usedNumbers
+        };
+      });
+
+      return result;
+    }, 60); // 60 second TTL for chart data
+
+    return NextResponse.json(data);
+
   } catch (error) {
     console.error("Chart API error:", error);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

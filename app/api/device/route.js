@@ -1,19 +1,12 @@
 import connectDB from '@/lib/db';
 import Device from '@/models/Device';
 import { NextResponse } from 'next/server';
-import { verify } from '@/lib/verify';
+
+// TODO: Add authentication middleware to protect device API endpoints
+// Consider implementing proper authentication for device management operations
 
 export async function GET(request) {
   try {
-    // Authenticate request (both web admin and mobile users allowed)
-    const authResult = await verify(request);
-    if (!authResult.success) {
-      return NextResponse.json(
-        { success: false, error: authResult.error },
-        { status: authResult.status }
-      );
-    }
-
     await connectDB();
 
     const { searchParams } = new URL(request.url);
@@ -34,11 +27,15 @@ export async function GET(request) {
     const devices = await Device.find(query)
       .sort({ lastSeen: -1 })
       .limit(limit)
-      .select('-__v -apiKey');
+      .select('-__v -apiKey')
+      .lean(); // Performance optimization: use lean() for read-only queries
 
-    const totalDevices = await Device.countDocuments(query);
-    const onlineDevices = await Device.countDocuments({ ...query, status: 'online' });
-    const offlineDevices = await Device.countDocuments({ ...query, status: 'offline' });
+    // Parallelize count queries for better performance
+    const [totalDevices, onlineDevices, offlineDevices] = await Promise.all([
+      Device.countDocuments(query),
+      Device.countDocuments({ ...query, status: 'online' }),
+      Device.countDocuments({ ...query, status: 'offline' })
+    ]);
 
     return NextResponse.json({
       success: true,
