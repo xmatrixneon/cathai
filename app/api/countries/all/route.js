@@ -13,10 +13,10 @@ export async function GET(req) {
       return NextResponse.json({ error: err.error }, { status: err.status || 401 })
     }
 
-    // Cache countries for 1 hour (static data rarely changes)
+    // Cache countries for 5 minutes (invalidated on updates)
     const countries = await getCached('static:countries', async () => {
       return await Countires.find().sort({ name: 1 }).lean()
-    }, 3600)
+    }, 300)
 
     return NextResponse.json({ success: true, countries }, { status: 200 })
   } catch (error) {

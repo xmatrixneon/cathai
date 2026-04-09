@@ -2,6 +2,7 @@ import connectDB from "@/lib/db"
 import Countires from "@/models/Countires"
 import { NextResponse } from "next/server"
 import { verify } from "@/lib/verify"
+import { deleteCache } from "@/lib/cache"
 
 export async function PUT(req, context) {
   try {
@@ -32,6 +33,9 @@ export async function PUT(req, context) {
     if (!updated) {
       return NextResponse.json({ success: false, error: "Country not found" }, { status: 404 })
     }
+
+    // Invalidate countries cache
+    await deleteCache('static:countries')
 
     return NextResponse.json({ success: true, country: updated })
   } catch (error) {

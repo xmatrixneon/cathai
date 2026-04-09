@@ -39,9 +39,9 @@ async function cleanupStaleDevices() {
       return { deleted: 0, errors: 0 };
     }
 
-    console.log(`\n${'─'.repeat(55)}`);
-    console.log(`🧹 CLEANUP: Found ${staleDevices.length} device(s) offline for ${AUTO_DELETE_HOURS}+ hours`);
-    console.log(`${'─'.repeat(55)}`);
+    // console.log(`\n${'─'.repeat(55)}`);
+    // console.log(`🧹 CLEANUP: Found ${staleDevices.length} device(s) offline for ${AUTO_DELETE_HOURS}+ hours`);
+    // console.log(`${'─'.repeat(55)}`);
 
     let deletedCount = 0;
     let errorCount = 0;
@@ -65,17 +65,20 @@ async function cleanupStaleDevices() {
         // console.log(`   Messages deleted: ${messagesDeleted.deletedCount}, Numbers deactivated: ${numbersDeactivated.modifiedCount}`);
       } catch (err) {
         errorCount++;
-        console.error(`❌ Failed to delete device ${device.deviceId}: ${err.message}`);
+        console.error(`[Status] Failed to delete device ${device.deviceId}: ${err.message}`);
       }
     }
 
-    console.log(`${'─'.repeat(55)}`);
-    console.log(`✅ CLEANUP DONE: Deleted ${deletedCount} device(s)${errorCount > 0 ? `, ${errorCount} error(s)` : ''}`);
-    console.log(`${'─'.repeat(55)}`);
+    if (deletedCount > 0) {
+      console.log(`[Status] Cleanup: Deleted ${deletedCount} stale device(s)${errorCount > 0 ? `, ${errorCount} error(s)` : ''}`);
+    }
+    // console.log(`${'─'.repeat(55)}`);
+    // console.log(`✅ CLEANUP DONE: Deleted ${deletedCount} device(s)${errorCount > 0 ? `, ${errorCount} error(s)` : ''}`);
+    // console.log(`${'─'.repeat(55)}`);
 
     return { deleted: deletedCount, errors: errorCount };
   } catch (err) {
-    console.error(`❌ CLEANUP ERROR: ${err.message}`);
+    console.error(`[Status] Cleanup error: ${err.message}`);
     return { deleted: 0, errors: 1 };
   }
 }
@@ -97,12 +100,12 @@ export async function handleStatusJob(data) {
     const totalNumbersBefore = await Numbers.countDocuments();
     const activeNumbersBefore = await Numbers.countDocuments({ active: true });
 
-    console.log(`\n${'─'.repeat(55)}`);
-    console.log(`🔄 SYNC  ${timestamp}`);
-    console.log(`${'─'.repeat(55)}`);
-    console.log(`📱 Devices   Total: ${activeDevices.length}  🟢 Online: ${onlineDevices.length}  🔴 Offline: ${offlineDevices.length}`);
-    console.log(`📋 Numbers   Total: ${totalNumbersBefore}  ✅ Active: ${activeNumbersBefore}  ❌ Inactive: ${totalNumbersBefore - activeNumbersBefore}`);
-    console.log(`${'─'.repeat(55)}`);
+    // console.log(`\n${'─'.repeat(55)}`);
+    // console.log(`🔄 SYNC  ${timestamp}`);
+    // console.log(`${'─'.repeat(55)}`);
+    // console.log(`📱 Devices   Total: ${activeDevices.length}  🟢 Online: ${onlineDevices.length}  🔴 Offline: ${offlineDevices.length}`);
+    // console.log(`📋 Numbers   Total: ${totalNumbersBefore}  ✅ Active: ${activeNumbersBefore}  ❌ Inactive: ${totalNumbersBefore - activeNumbersBefore}`);
+    // console.log(`${'─'.repeat(55)}`);
 
     const indiaId = await getIndiaId();
     const allDeviceNumberPorts = new Set();
@@ -123,7 +126,7 @@ export async function handleStatusJob(data) {
         await device.save();
         if (isOnline) {
           statusChangedOnline++;
-          // console.log(`🟢 ONLINE   ${device.deviceId} (${device.name || 'unnamed'})`);
+          console.log(`[Status] Device ${device.deviceId} came online`);
         } else {
           statusChangedOffline++;
           // console.log(`🔴 OFFLINE  ${device.deviceId} (${device.name || 'unnamed'})`);
@@ -288,16 +291,17 @@ export async function handleStatusJob(data) {
     const activeNumbersAfter = await Numbers.countDocuments({ active: true });
     const elapsed = Date.now() - startTime;
 
-    console.log(`${'─'.repeat(55)}`);
-    console.log(`✅ DONE  (${elapsed}ms)`);
-    console.log(`   Synced:       ${syncedCount} numbers`);
-    console.log(`   Deactivated:  ${deactivatedCount} numbers`);
-    if (numberChangedCount > 0)
-      console.log(`   SIM swaps:    ${numberChangedCount} numbers replaced`);
-    if (statusChangedOnline > 0 || statusChangedOffline > 0)
-      console.log(`   Status chg:   +${statusChangedOnline} online  -${statusChangedOffline} offline`);
-    console.log(`   Numbers now:  Total: ${totalNumbersAfter}  ✅ Active: ${activeNumbersAfter}  ❌ Inactive: ${totalNumbersAfter - activeNumbersAfter}`);
-    console.log(`${'─'.repeat(55)}\n`);
+    console.log(`[Status] Sync complete (${elapsed}ms): ${syncedCount} synced, ${deactivatedCount} deactivated, ${numberChangedCount} SIM swaps, +${statusChangedOnline} online, -${statusChangedOffline} offline`);
+    // console.log(`${'─'.repeat(55)}`);
+    // console.log(`✅ DONE  (${elapsed}ms)`);
+    // console.log(`   Synced:       ${syncedCount} numbers`);
+    // console.log(`   Deactivated:  ${deactivatedCount} numbers`);
+    // if (numberChangedCount > 0)
+    //   console.log(`   SIM swaps:    ${numberChangedCount} numbers replaced`);
+    // if (statusChangedOnline > 0 || statusChangedOffline > 0)
+    //   console.log(`   Status chg:   +${statusChangedOnline} online  -${statusChangedOffline} offline`);
+    // console.log(`   Numbers now:  Total: ${totalNumbersAfter}  ✅ Active: ${activeNumbersAfter}  ❌ Inactive: ${totalNumbersAfter - activeNumbersAfter}`);
+    // console.log(`${'─'.repeat(55)}\n`);
 
     // Update CronStatus for dashboard display
     try {

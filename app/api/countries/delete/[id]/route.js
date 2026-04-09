@@ -2,6 +2,7 @@ import connectDB from "@/lib/db"
 import Countires from "@/models/Countires"
 import { NextResponse } from "next/server"
 import { verify } from "@/lib/verify"
+import { deleteCache } from "@/lib/cache"
 export async function DELETE(req, context) {
   try {
     await connectDB()
@@ -16,6 +17,9 @@ export async function DELETE(req, context) {
     if (!deleted) {
       return NextResponse.json({ success: false, error: "Country not found" }, { status: 404 })
     }
+
+    // Invalidate countries cache
+    await deleteCache('static:countries')
 
     return NextResponse.json({ success: true, message: "Deleted successfully" })
   } catch (error) {

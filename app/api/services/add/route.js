@@ -2,6 +2,7 @@ import connectDB from "@/lib/db"
 import Service from "@/models/Service"
 import { NextResponse } from "next/server"
 import { verify } from "@/lib/verify"
+import { deleteCache } from "@/lib/cache"
 
 export async function POST(req) {
   try {
@@ -37,6 +38,9 @@ export async function POST(req) {
     })
 
     await service.save()
+
+    // Invalidate services cache
+    await deleteCache('static:services')
 
     return NextResponse.json({ success: true, service }, { status: 201 })
   } catch (error) {

@@ -18,16 +18,16 @@ async function suspendLowSmsNumbers() {
   const startTime = Date.now();
   const timestamp = new Date().toISOString();
 
-  console.log(`\n${'═'.repeat(60)}`);
-  console.log(`🔍 ORDER SUSPEND CHECK  ${timestamp}`);
-  console.log(`${'═'.repeat(60)}`);
-  console.log(`⚙️  Config:`);
-  console.log(`   Order threshold:      ${SMS_SUSPEND_ORDER_THRESHOLD}+ orders`);
-  console.log(`   Time window:          ${SMS_SUSPEND_WINDOW_HOURS} hours`);
-  console.log(`   Inactivity days:     ${SMS_SUSPEND_INACTIVITY_DAYS}+ days`);
-  console.log(`   Condition:            ALL orders have 0 SMS AND no messages for ${SMS_SUSPEND_INACTIVITY_DAYS}+ days`);
-  console.log(`   Dry run:              ${SMS_SUSPEND_DRY_RUN ? 'YES' : 'NO'}`);
-  console.log(`${'═'.repeat(60)}`);
+  // console.log(`\n${'═'.repeat(60)}`);
+  // console.log(`🔍 ORDER SUSPEND CHECK  ${timestamp}`);
+  // console.log(`${'═'.repeat(60)}`);
+  // console.log(`⚙️  Config:`);
+  // console.log(`   Order threshold:      ${SMS_SUSPEND_ORDER_THRESHOLD}+ orders`);
+  // console.log(`   Time window:          ${SMS_SUSPEND_WINDOW_HOURS} hours`);
+  // console.log(`   Inactivity days:     ${SMS_SUSPEND_INACTIVITY_DAYS}+ days`);
+  // console.log(`   Condition:            ALL orders have 0 SMS AND no messages for ${SMS_SUSPEND_INACTIVITY_DAYS}+ days`);
+  // console.log(`   Dry run:              ${SMS_SUSPEND_DRY_RUN ? 'YES' : 'NO'}`);
+  // console.log(`${'═'.repeat(60)}`);
 
   try {
     const cutoffTime = new Date(Date.now() - SMS_SUSPEND_WINDOW_HOURS * 60 * 60 * 1000);
@@ -66,7 +66,7 @@ async function suspendLowSmsNumbers() {
     // Apply test number filter if specified
     if (SMS_TEST_NUMBER) {
       aggregationPipeline[0].$match.number = SMS_TEST_NUMBER;
-      console.log(`🧪 TEST MODE: Only checking number ${SMS_TEST_NUMBER}`);
+      console.log(`[Suspend] TEST MODE: Only checking number ${SMS_TEST_NUMBER}`);
     }
 
     const numbersToSuspend = await mongoose.connection.db.collection('orders').aggregate(aggregationPipeline).toArray();
@@ -93,14 +93,14 @@ async function suspendLowSmsNumbers() {
       // Skip if number received a message recently (within inactivity period)
       if (lastMessageTime && lastMessageTime > inactivityCutoffDate) {
         const daysSinceLastMessage = Math.floor((Date.now() - lastMessageTime.getTime()) / (24 * 60 * 60 * 1000));
-        console.log(`⏸️  SKIP: ${item._id} → ${item.totalOrders} orders, 0 SMS, but last message ${daysSinceLastMessage} days ago (within ${SMS_SUSPEND_INACTIVITY_DAYS} day threshold)`);
+        // console.log(`⏸️  SKIP: ${item._id} → ${item.totalOrders} orders, 0 SMS, but last message ${daysSinceLastMessage} days ago (within ${SMS_SUSPEND_INACTIVITY_DAYS} day threshold)`);
         inactivitySkippedCount++;
         continue;
       }
 
       const daysInactive = lastMessageTime ? Math.floor((Date.now() - lastMessageTime.getTime()) / (24 * 60 * 60 * 1000)) : 'Unknown';
 
-      console.log(`⚠️  SUSPEND: ${item._id} → ${item.totalOrders} orders, 0 SMS, inactive for ${daysInactive}+ days`);
+      // console.log(`⚠️  SUSPEND: ${item._id} → ${item.totalOrders} orders, 0 SMS, inactive for ${daysInactive}+ days`);
 
       if (!SMS_SUSPEND_DRY_RUN) {
         await Numbers.findByIdAndUpdate(numberRecord._id, {
@@ -117,7 +117,7 @@ async function suspendLowSmsNumbers() {
         });
         suspendedCount++;
       } else {
-        console.log(`   [DRY RUN] Would suspend ${item._id}`);
+        // console.log(`   [DRY RUN] Would suspend ${item._id}`);
       }
     }
 
@@ -167,7 +167,7 @@ async function suspendLowSmsNumbers() {
 
       // Recover if ANY SMS received
       if (smsCount > 0) {
-        console.log(`✅ RECOVER: ${number.number} → ${smsCount} SMS received`);
+        // console.log(`✅ RECOVER: ${number.number} → ${smsCount} SMS received`);
 
         if (!SMS_SUSPEND_DRY_RUN) {
           await Numbers.findByIdAndUpdate(number._id, {
@@ -179,21 +179,22 @@ async function suspendLowSmsNumbers() {
           });
           recoveredCount++;
         } else {
-          console.log(`   [DRY RUN] Would recover ${number.number}`);
+          // console.log(`   [DRY RUN] Would recover ${number.number}`);
         }
       }
     }
 
     const elapsed = Date.now() - startTime;
 
-    console.log(`${'═'.repeat(60)}`);
-    console.log(`✅ DONE  (${elapsed}ms)`);
-    console.log(`   Checked:          ${numbersToSuspend.length} numbers meeting order criteria`);
-    console.log(`   Suspended:        ${suspendedCount} numbers`);
-    console.log(`   Skipped (recent): ${inactivitySkippedCount} numbers (received message recently)`);
-    console.log(`   Skipped (other):   ${skippedCount} numbers (already suspended or inactive)`);
-    console.log(`   Recovered:        ${recoveredCount} numbers`);
-    console.log(`${'═'.repeat(60)}\n`);
+    console.log(`[Suspend] Suspend check complete: ${suspendedCount} suspended, ${inactivitySkippedCount} skipped (recent), ${skippedCount} skipped (other), ${recoveredCount} recovered (${elapsed}ms)`);
+    // console.log(`${'═'.repeat(60)}`);
+    // console.log(`✅ DONE  (${elapsed}ms)`);
+    // console.log(`   Checked:          ${numbersToSuspend.length} numbers meeting order criteria`);
+    // console.log(`   Suspended:        ${suspendedCount} numbers`);
+    // console.log(`   Skipped (recent): ${inactivitySkippedCount} numbers (received message recently)`);
+    // console.log(`   Skipped (other):   ${skippedCount} numbers (already suspended or inactive)`);
+    // console.log(`   Recovered:        ${recoveredCount} numbers`);
+    // console.log(`${'═'.repeat(60)}\n`);
 
     return {
       suspended: suspendedCount,
@@ -204,8 +205,9 @@ async function suspendLowSmsNumbers() {
     };
 
   } catch (err) {
-    console.error(`\n❌ SUSPEND CHECK ERROR  ${timestamp}`);
-    console.error(`   ${err.message}\n`);
+    console.error(`[Suspend] Suspend check error: ${err.message}`);
+    // console.error(`\n❌ SUSPEND CHECK ERROR  ${timestamp}`);
+    // console.error(`   ${err.message}\n`);
     throw err;
   }
 }
@@ -217,9 +219,9 @@ async function recoverLowSmsNumbers() {
   const startTime = Date.now();
   const timestamp = new Date().toISOString();
 
-  console.log(`\n${'═'.repeat(60)}`);
-  console.log(`🔄 RECOVERY CHECK  ${timestamp}`);
-  console.log(`${'═'.repeat(60)}`);
+  // console.log(`\n${'═'.repeat(60)}`);
+  // console.log(`🔄 RECOVERY CHECK  ${timestamp}`);
+  // console.log(`${'═'.repeat(60)}`);
 
   try {
     const cutoffTime = new Date(Date.now() - SMS_SUSPEND_WINDOW_HOURS * 60 * 60 * 1000);
@@ -271,7 +273,7 @@ async function recoverLowSmsNumbers() {
 
       // Recover if ANY SMS received
       if (smsCount > 0) {
-        console.log(`✅ RECOVER: ${number.number} → ${smsCount} SMS received`);
+        // console.log(`✅ RECOVER: ${number.number} → ${smsCount} SMS received`);
 
         await Numbers.findByIdAndUpdate(number._id, {
           $set: {
@@ -288,12 +290,13 @@ async function recoverLowSmsNumbers() {
 
     const elapsed = Date.now() - startTime;
 
-    console.log(`${'═'.repeat(60)}`);
-    console.log(`✅ DONE  (${elapsed}ms)`);
-    console.log(`   Checked:      ${lowSmsSuspended.length} suspended numbers`);
-    console.log(`   Recovered:    ${recoveredCount} numbers`);
-    console.log(`   Still suspended: ${stillSuspendedCount} numbers`);
-    console.log(`${'═'.repeat(60)}\n`);
+    console.log(`[Suspend] Recovery check complete: ${recoveredCount} recovered, ${stillSuspendedCount} still suspended (${elapsed}ms)`);
+    // console.log(`${'═'.repeat(60)}`);
+    // console.log(`✅ DONE  (${elapsed}ms)`);
+    // console.log(`   Checked:      ${lowSmsSuspended.length} suspended numbers`);
+    // console.log(`   Recovered:    ${recoveredCount} numbers`);
+    // console.log(`   Still suspended: ${stillSuspendedCount} numbers`);
+    // console.log(`${'═'.repeat(60)}\n`);
 
     return {
       recovered: recoveredCount,
@@ -302,8 +305,9 @@ async function recoverLowSmsNumbers() {
     };
 
   } catch (err) {
-    console.error(`\n❌ RECOVERY CHECK ERROR  ${timestamp}`);
-    console.error(`   ${err.message}\n`);
+    console.error(`[Suspend] Recovery check error: ${err.message}`);
+    // console.error(`\n❌ RECOVERY CHECK ERROR  ${timestamp}`);
+    // console.error(`   ${err.message}\n`);
     throw err;
   }
 }

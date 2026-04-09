@@ -13,10 +13,10 @@ export async function GET(req) {
     return NextResponse.json({ error: result.error }, { status: result.status || 401 });
   }
 
-  // Cache services for 1 hour (static data rarely changes)
+  // Cache services for 5 minutes (invalidated on updates)
   const services = await getCached('static:services', async () => {
     return await Service.find().lean()
-  }, 3600)
+  }, 300)
 
   return NextResponse.json(services)
 }

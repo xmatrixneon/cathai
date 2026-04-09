@@ -52,15 +52,15 @@ async function findDevicesWithActiveOrders() {
   const activeOrders = await Orders.find({ active: true }, { number: 1 });
 
   if (activeOrders.length === 0) {
-    console.log(`   ✅ No active orders found`);
+    // console.log(`   ✅ No active orders found`);
     return [];
   }
 
-  console.log(`   📋 Found ${activeOrders.length} active order(s)`);
+  // console.log(`   📋 Found ${activeOrders.length} active order(s)`);
 
   // Step 2: Extract unique phone numbers (deduplicate at order level)
   const phoneNumbers = [...new Set(activeOrders.map(order => order.number))];
-  console.log(`      Unique phone numbers: ${phoneNumbers.length}`);
+  // console.log(`      Unique phone numbers: ${phoneNumbers.length}`);
 
   // Step 3: Lookup numbers collection to get ports
   const numbers = await Numbers.find(
@@ -69,11 +69,11 @@ async function findDevicesWithActiveOrders() {
   );
 
   if (numbers.length === 0) {
-    console.log(`   ⚠️  No active numbers found for these orders`);
+    // console.log(`   ⚠️  No active numbers found for these orders`);
     return [];
   }
 
-  console.log(`      Active numbers: ${numbers.length}`);
+  // console.log(`      Active numbers: ${numbers.length}`);
 
   // Step 4: Parse port field to extract device IDs (deduplicate at port level)
   const deviceIds = new Set();
@@ -89,11 +89,11 @@ async function findDevicesWithActiveOrders() {
   }
 
   if (deviceIds.size === 0) {
-    console.log(`   ⚠️  No valid ports found for these numbers`);
+    // console.log(`   ⚠️  No valid ports found for these numbers`);
     return [];
   }
 
-  console.log(`      Unique device IDs: ${deviceIds.size}`);
+  // console.log(`      Unique device IDs: ${deviceIds.size}`);
 
   // Step 5: Lookup devices with these IDs and valid FCM tokens
   const deviceIdArray = Array.from(deviceIds);
@@ -104,11 +104,11 @@ async function findDevicesWithActiveOrders() {
   });
 
   if (devices.length === 0) {
-    console.log(`   ⚠️  No devices with valid FCM tokens found`);
+    // console.log(`   ⚠️  No devices with valid FCM tokens found`);
     return [];
   }
 
-  console.log(`      Devices with FCM tokens: ${devices.length}`);
+  // console.log(`      Devices with FCM tokens: ${devices.length}`);
 
   return devices;
 }
@@ -167,7 +167,7 @@ async function sendKeepAlivePing(device) {
     };
 
     await getMessaging(firebaseApp).send(message);
-    console.log(`      FCM Token: ${device.fcmToken.substring(0, 20)}...`);
+    // console.log(`      FCM Token: ${device.fcmToken.substring(0, 20)}...`);
     return { success: true, isStaleToken: false };
 
   } catch (error) {
@@ -175,7 +175,7 @@ async function sendKeepAlivePing(device) {
     if (error.code === 'messaging/registration-token-not-registered') {
       return { success: false, isStaleToken: true };
     }
-    console.log(`      Error: ${error.message}`);
+    // console.log(`      Error: ${error.message}`);
     return { success: false, isStaleToken: false };
   }
 }
@@ -185,17 +185,16 @@ async function sendKeepAlivePing(device) {
  */
 async function sendKeepAlivePings() {
   const startTime = Date.now();
-  const timestamp = new Date().toISOString();
 
-  console.log(`\n${'═'.repeat(60)}`);
-  console.log(`🔄 FCM KEEP-ALIVE SCAN  ${timestamp}`);
-  console.log(`${'═'.repeat(60)}`);
+  // console.log(`\n${'═'.repeat(60)}`);
+  // console.log(`🔄 FCM KEEP-ALIVE SCAN  ${new Date().toISOString()}`);
+  // console.log(`${'═'.repeat(60)}`);
 
   try {
     const devices = await findDevicesWithActiveOrders();
 
     if (devices.length === 0) {
-      console.log(`${'═'.repeat(60)}\n`);
+      // console.log(`${'═'.repeat(60)}\n`);
       return {
         success: true,
         notificationsSent: 0,
@@ -205,9 +204,9 @@ async function sendKeepAlivePings() {
       };
     }
 
-    console.log(`   Minimum heartbeat age: ${MIN_HEARTBEAT_AGE_SECONDS}s`);
-    console.log(`   Cooldown period: ${COOLDOWN_MINUTES} minutes`);
-    console.log(`${'─'.repeat(60)}`);
+    // console.log(`   Minimum heartbeat age: ${MIN_HEARTBEAT_AGE_SECONDS}s`);
+    // console.log(`   Cooldown period: ${COOLDOWN_MINUTES} minutes`);
+    // console.log(`${'─'.repeat(60)}`);
 
     let successCount = 0;
     let skipCount = 0;
@@ -221,8 +220,8 @@ async function sendKeepAlivePings() {
 
       // Skip if heartbeat is too recent (device is actively maintaining connection)
       if (heartbeatAge < MIN_HEARTBEAT_AGE_SECONDS) {
-        console.log(`   ⏭️  SKIP     ${device.deviceId} (${device.name || 'unnamed'})`);
-        console.log(`      Reason: Heartbeat too recent (${heartbeatAge}s ago < ${MIN_HEARTBEAT_AGE_SECONDS}s minimum)`);
+        // console.log(`   ⏭️  SKIP     ${device.deviceId} (${device.name || 'unnamed'})`);
+        // console.log(`      Reason: Heartbeat too recent (${heartbeatAge}s ago < ${MIN_HEARTBEAT_AGE_SECONDS}s minimum)`);
         tooRecentCount++;
         continue;
       }
@@ -231,14 +230,14 @@ async function sendKeepAlivePings() {
       if (!canSendKeepAlive(device)) {
         const attempts = keepAliveAttempts.get(device.deviceId);
         const timeSinceLastAttempt = Math.floor((Date.now() - attempts?.lastAttempt || 0) / 1000 / 60);
-        console.log(`   ⏭️  SKIP     ${device.deviceId} (${device.name || 'unnamed'})`);
-        console.log(`      Reason: In cooldown (${timeSinceLastAttempt}/${COOLDOWN_MINUTES} minutes)`);
+        // console.log(`   ⏭️  SKIP     ${device.deviceId} (${device.name || 'unnamed'})`);
+        // console.log(`      Reason: In cooldown (${timeSinceLastAttempt}/${COOLDOWN_MINUTES} minutes)`);
         skipCount++;
         continue;
       }
 
-      console.log(`   📡 KEEP-ALIVE ${device.deviceId} (${device.name || 'unnamed'})`);
-      console.log(`      Status: ${device.status}, Heartbeat age: ${heartbeatAge}s ago`);
+      // console.log(`   📡 KEEP-ALIVE ${device.deviceId} (${device.name || 'unnamed'})`);
+      // console.log(`      Status: ${device.status}, Heartbeat age: ${heartbeatAge}s ago`);
 
       // Send FCM keep-alive notification
       const result = await sendKeepAlivePing(device);
@@ -246,7 +245,7 @@ async function sendKeepAlivePings() {
       if (result.success) {
         recordKeepAliveAttempt(device.deviceId);
         successCount++;
-        console.log(`      ✅ Keep-alive sent successfully`);
+        // console.log(`      ✅ Keep-alive sent successfully`);
       } else if (result.isStaleToken) {
         staleTokenCount++;
         // Mark device as having no valid FCM token
@@ -254,25 +253,26 @@ async function sendKeepAlivePings() {
           { deviceId: device.deviceId },
           { $unset: { fcmToken: "", fcmTokenUpdatedAt: "" } }
         );
-        console.log(`      ⚠️  Stale FCM token removed`);
+        // console.log(`      ⚠️  Stale FCM token removed`);
       } else {
         failCount++;
-        console.log(`      ❌ Failed to send keep-alive`);
+        // console.log(`      ❌ Failed to send keep-alive`);
       }
 
-      console.log();
+      // console.log();
     }
 
     const elapsed = Date.now() - startTime;
 
-    console.log(`${'─'.repeat(60)}`);
-    console.log(`📊 SUMMARY  (${elapsed}ms)`);
-    console.log(`   ✅ Success: ${successCount} device(s) pinged`);
-    console.log(`   ⏭️  Skipped: ${skipCount} device(s) (cooldown)`);
-    console.log(`   ⏰  Too recent: ${tooRecentCount} device(s) (heartbeat)`);
-    console.log(`   ⚠️  Stale tokens removed: ${staleTokenCount} device(s)`);
-    console.log(`   ❌ Failed:  ${failCount} device(s)`);
-    console.log(`${'═'.repeat(60)}\n`);
+    console.log(`[Keepalive] Scan complete: ${successCount} pinged, ${skipCount} skipped (cooldown), ${tooRecentCount} too recent, ${staleTokenCount} stale tokens, ${failCount} failed (${elapsed}ms)`);
+    // console.log(`${'─'.repeat(60)}`);
+    // console.log(`📊 SUMMARY  (${elapsed}ms)`);
+    // console.log(`   ✅ Success: ${successCount} device(s) pinged`);
+    // console.log(`   ⏭️  Skipped: ${skipCount} device(s) (cooldown)`);
+    // console.log(`   ⏰  Too recent: ${tooRecentCount} device(s) (heartbeat)`);
+    // console.log(`   ⚠️  Stale tokens removed: ${staleTokenCount} device(s)`);
+    // console.log(`   ❌ Failed:  ${failCount} device(s)`);
+    // console.log(`${'═'.repeat(60)}\n`);
 
     return {
       success: true,
@@ -283,8 +283,8 @@ async function sendKeepAlivePings() {
     };
 
   } catch (err) {
-    console.error(`❌ KEEP-ALIVE ERROR: ${err.message}`);
-    console.error(`   ${err.stack}\n`);
+    console.error(`[Keepalive] Error: ${err.message}`);
+    // console.error(`   ${err.stack}\n`);
     return {
       success: false,
       notificationsSent: 0,

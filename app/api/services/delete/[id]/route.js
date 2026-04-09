@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import Service from "@/models/Service";
 import { verify } from "@/lib/verify"
+import { deleteCache } from "@/lib/cache"
 
 export async function DELETE(_, { params }, req) {
   try {
@@ -15,6 +16,10 @@ export async function DELETE(_, { params }, req) {
     if (!deleted) {
       return NextResponse.json({ error: "Service not found" }, { status: 404 });
     }
+
+    // Invalidate services cache
+    await deleteCache('static:services')
+
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
