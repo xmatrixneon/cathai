@@ -50,11 +50,19 @@ export async function POST(request) {
       // Process batch in parallel
       const batchResults = await Promise.all(
         batch.map(async (device) => {
-          const success = await sendWakeUpNotification(device.deviceId, device.fcmToken);
+          const result = await sendWakeUpNotification(device.deviceId, device.fcmToken);
+          // Clean up stale tokens
+          if (!result.success && result.isStaleToken) {
+            await Device.updateOne(
+              { deviceId: device.deviceId },
+              { $unset: { fcmToken: '', fcmTokenUpdatedAt: '' } }
+            );
+          }
           return {
             deviceId: device.deviceId,
             name: device.name,
-            success
+            success: result.success,
+            isStaleToken: result.isStaleToken
           };
         })
       );

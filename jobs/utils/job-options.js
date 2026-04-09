@@ -48,6 +48,15 @@ export const jobOptions = {
     removeOnComplete: 10,
     removeOnFail: 50,
   },
+  'device-wakeup': {
+    attempts: 3,
+    backoff: {
+      type: 'exponential',
+      delay: 5000,
+    },
+    removeOnComplete: 50,
+    removeOnFail: 200,
+  },
 };
 
 // Get job options for a specific queue

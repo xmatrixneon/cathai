@@ -80,6 +80,9 @@ export default function ActiveOrdersPage() {
 
   useEffect(() => {
     fetchOrders(1)
+  }, [])
+
+  useEffect(() => {
     const interval = setInterval(() => fetchOrders(currentPage), 15000) // Auto-refresh every 15s (reduced from 5s)
     return () => clearInterval(interval)
   }, [currentPage])
@@ -154,7 +157,7 @@ export default function ActiveOrdersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {paginatedOrders.map(order => (
+                    {orders.map(order => (
                       <TableRow key={order.id}>
                         <TableCell className="font-medium">{order.number}</TableCell>
                         <TableCell>{order.serviceName}</TableCell>

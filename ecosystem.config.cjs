@@ -60,5 +60,15 @@ module.exports = {
         MESSAGE_CLEANUP_BATCH_SIZE: '1000'
       },
     },
+    {
+      name: 'worker:wakeup',
+      script: 'workers/wakeup-worker.js',
+      env: {
+        BULLMQ_WAKEUP_ENABLED: 'true',
+        BULLMQ_CONCURRENCY_DEVICE_WAKEUP: '2',
+        FCM_WAKE_UP_OFFLINE_THRESHOLD: '60',
+        FCM_WAKE_UP_COOLDOWN: '0',
+      },
+    },
   ],
 };

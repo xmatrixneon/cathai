@@ -68,7 +68,7 @@ async function updateNumberQuality(number, impact, reason, orderId) {
   const numDoc = await Numbers.findOne({ number });
 
   if (!numDoc) {
-    console.warn(`      [Fetch] Number ${number} not found for quality update`);
+    // console.warn(`      [Fetch] Number ${number} not found for quality update`);
     return;
   }
 
@@ -118,7 +118,7 @@ async function updateNumberQuality(number, impact, reason, orderId) {
     }
   );
 
-  console.log(`      [Fetch] Quality ${number}: ${newQualityScore} (${impact > 0 ? '+' : ''}${impact})`);
+  // console.log(`      [Fetch] Quality ${number}: ${newQualityScore} (${impact > 0 ? '+' : ''}${impact})`);
 }
 
 export async function handleFetchJob(data) {
@@ -217,7 +217,7 @@ export async function handleFetchJob(data) {
           await updateNumberQuality(order.number, qualityImpact, failureReason, order._id);
         }
 
-        console.log(`[Fetch] Order ${order._id} expired (${ageMinutes.toFixed(1)}min) - ${failureReason}`);
+        // console.log(`[Fetch] Order ${order._id} expired (${ageMinutes.toFixed(1)}min) - ${failureReason}`);
         continue;
       }
 
@@ -225,7 +225,7 @@ export async function handleFetchJob(data) {
 
       // 2. Check message limit
       if (order.maxmessage !== 0 && messageLength >= order.maxmessage) {
-        console.log(`[Fetch] Order ${order._id} - message limit reached (${messageLength}/${order.maxmessage})`);
+        // console.log(`[Fetch] Order ${order._id} - message limit reached (${messageLength}/${order.maxmessage})`);
         continue;
       }
 
@@ -251,7 +251,7 @@ export async function handleFetchJob(data) {
         fullNumber = `+${numberWithCountry}`;
       }
 
-      console.log(`[Fetch] Order ${order._id} — number: ${order.number} (full: ${fullNumber})`);
+      // console.log(`[Fetch] Order ${order._id} — number: ${order.number} (full: ${fullNumber})`);
 
       // Look up messages from the grouped map (NO DB QUERY!)
       let messages = [];
@@ -292,20 +292,20 @@ export async function handleFetchJob(data) {
         }
 
         if (messages.length > 0) {
-          console.log(`[Fetch] Order ${order._id} - matched messages (partial): ${messages.length} - using last 10 digits: ${orderNumberStr.slice(-10)}`);
+          // console.log(`[Fetch] Order ${order._id} - matched messages (partial): ${messages.length} - using last 10 digits: ${orderNumberStr.slice(-10)}`);
         }
       } else if (messages.length > 0) {
-        console.log(`[Fetch] Order ${order._id} - matched messages (exact): ${messages.length}`);
+        // console.log(`[Fetch] Order ${order._id} - matched messages (exact): ${messages.length}`);
       }
 
       // 4. Multi-use logic
       if (order.message.length > 0) {
         if (!order.ismultiuse) {
-          console.log(`[Fetch] Order ${order._id} - already has OTP, multiuse=false → skip`);
+          // console.log(`[Fetch] Order ${order._id} - already has OTP, multiuse=false → skip`);
           continue;
         }
         if (!order.nextsms) {
-          console.log(`[Fetch] Order ${order._id} - multiuse enabled but nextsms=false → wait`);
+          // console.log(`[Fetch] Order ${order._id} - multiuse enabled but nextsms=false → wait`);
           continue;
         }
       }
@@ -313,16 +313,16 @@ export async function handleFetchJob(data) {
       for (const msg of messages) {
         // Skip if already saved
         if (order.message.includes(msg.message)) {
-          console.log(`[Fetch] Order ${order._id} - message already saved, skipping`);
+          // console.log(`[Fetch] Order ${order._id} - message already saved, skipping`);
           continue;
         }
 
         if (!containsKeywords(msg.message, order.keywords)) {
-          console.log(`[Fetch] Order ${order._id} - skipped (keywords not matched)`);
+          // console.log(`[Fetch] Order ${order._id} - skipped (keywords not matched)`);
           continue;
         }
 
-        console.log(`[Fetch] Order ${order._id} - message from ${msg.sender}: ${msg.message.substring(0, 80)}...`);
+        // console.log(`[Fetch] Order ${order._id} - message from ${msg.sender}: ${msg.message.substring(0, 80)}...`);
 
         let otpFound = null;
 
@@ -336,7 +336,7 @@ export async function handleFetchJob(data) {
           const m = regex.exec(cleanMessage);
           otpFound = m?.groups?.otp || (m && m[1]) || null;
           if (otpFound) {
-            console.log(`[Fetch] Order ${order._id} - extracted OTP via format regex`);
+            // console.log(`[Fetch] Order ${order._id} - extracted OTP via format regex`);
             break;
           }
         }
@@ -374,7 +374,7 @@ export async function handleFetchJob(data) {
             });
 
             await newLock.save();
-            console.log(`[Fetch] Order ${order._id} - first OTP received → marking as used + creating lock`);
+            // console.log(`[Fetch] Order ${order._id} - first OTP received → marking as used + creating lock`);
           }
 
           await Orders.updateOne(
@@ -385,20 +385,20 @@ export async function handleFetchJob(data) {
             }
           );
 
-          console.log(`[Fetch] Order ${order._id} - saved OTP: ${otpFound}`);
+          // console.log(`[Fetch] Order ${order._id} - saved OTP: ${otpFound}`);
           break; // save only one OTP per run
         } else {
-          console.log(`[Fetch] Order ${order._id} - no OTP found (formats didn't match)`);
+          // console.log(`[Fetch] Order ${order._id} - no OTP found (formats didn't match)`);
         }
       }
     }
 
     // === EXECUTE ALL UPDATES IN BATCH ===
-    console.log(`[Fetch] Executing ${orderUpdates.length} order updates (BULK WRITE)`);
+    // console.log(`[Fetch] Executing ${orderUpdates.length} order updates (BULK WRITE)`);
 
     if (orderUpdates.length > 0) {
       const updateResult = await Orders.bulkWrite(orderUpdates, { ordered: false });
-      console.log(`[Fetch] Bulk update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
+      // console.log(`[Fetch] Bulk update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
     }
 
     console.log(`[Fetch] Job completed - processed: ${processed}, otpsFound: ${otpsFound}`);
@@ -410,7 +410,7 @@ export async function handleFetchJob(data) {
         { lastRun: new Date() },
         { upsert: true }
       );
-      console.log('[Fetch] CronStatus updated');
+      // console.log('[Fetch] CronStatus updated');
     } catch (cronErr) {
       console.error('[Fetch] Failed to update CronStatus:', cronErr.message);
     }

@@ -113,6 +113,8 @@ const deviceSchema = new mongoose.Schema({
   // Firebase Cloud Messaging token for remote wake-up
   fcmToken: { type: String, default: null },
   fcmTokenUpdatedAt: { type: Date, default: null },
+  // Track last wake-up attempt for cooldown
+  lastWakeupAttempt: { type: Date, default: null },
 }, {
   timestamps: true,
 });

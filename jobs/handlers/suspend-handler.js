@@ -7,7 +7,7 @@ import Message from '../../models/Message.js';
 const SMS_AUTO_SUSPEND_ENABLED = process.env.SMS_AUTO_SUSPEND_ENABLED !== 'false';
 const SMS_SUSPEND_ORDER_THRESHOLD = parseInt(process.env.SMS_SUSPEND_ORDER_THRESHOLD || '10');
 const SMS_SUSPEND_WINDOW_HOURS = parseInt(process.env.SMS_SUSPEND_WINDOW_HOURS || '24');
-const SMS_SUSPEND_INACTIVITY_DAYS = parseInt(process.env.SMS_SUSPEND_INACTIVITY_DAYS || '7'); // NEW: Days of inactivity before suspend
+const SMS_SUSPEND_INACTIVITY_DAYS = parseInt(process.env.SMS_SUSPEND_INACTIVITY_DAYS || '1'); // Days of inactivity before suspend
 const SMS_SUSPEND_DRY_RUN = process.env.SMS_SUSPEND_DRY_RUN === 'true';
 const SMS_TEST_NUMBER = process.env.SMS_TEST_NUMBER ? parseInt(process.env.SMS_TEST_NUMBER) : null;
 

@@ -5,6 +5,8 @@ import Country from '../../models/Countires.js';
 import Device from '../../models/Device.js';
 import Message from '../../models/Message.js';
 import CronStatus from '../../models/Cron.js';
+import { sendWakeUpNotification } from '../../lib/fcm/send.js';
+import { initializeFirebase } from '../../lib/fcm/index.js';
 
 async function getIndiaId() {
   const country = await Country.findOne({ name: "India" });
@@ -59,8 +61,8 @@ async function cleanupStaleDevices() {
         await Device.deleteOne({ _id: device._id });
 
         deletedCount++;
-        console.log(`🗑️ DELETED  ${device.deviceId} (${device.name || 'unnamed'})`);
-        console.log(`   Messages deleted: ${messagesDeleted.deletedCount}, Numbers deactivated: ${numbersDeactivated.modifiedCount}`);
+        // console.log(`🗑️ DELETED  ${device.deviceId} (${device.name || 'unnamed'})`);
+        // console.log(`   Messages deleted: ${messagesDeleted.deletedCount}, Numbers deactivated: ${numbersDeactivated.modifiedCount}`);
       } catch (err) {
         errorCount++;
         console.error(`❌ Failed to delete device ${device.deviceId}: ${err.message}`);
@@ -121,10 +123,34 @@ export async function handleStatusJob(data) {
         await device.save();
         if (isOnline) {
           statusChangedOnline++;
-          console.log(`🟢 ONLINE   ${device.deviceId} (${device.name || 'unnamed'})`);
+          // console.log(`🟢 ONLINE   ${device.deviceId} (${device.name || 'unnamed'})`);
         } else {
           statusChangedOffline++;
-          console.log(`🔴 OFFLINE  ${device.deviceId} (${device.name || 'unnamed'})`);
+          // console.log(`🔴 OFFLINE  ${device.deviceId} (${device.name || 'unnamed'})`);
+
+          // Trigger immediate wake-up for devices that just went offline
+          if (device.fcmToken) {
+            initializeFirebase();
+            try {
+              const result = await sendWakeUpNotification(device.deviceId, device.fcmToken);
+              if (result.success) {
+                await Device.updateOne(
+                  { _id: device._id },
+                  { $set: { lastWakeupAttempt: new Date() } }
+                );
+                // console.log(`📡 WAKE-UP  Sent to ${device.deviceId}`);
+              } else if (result.isStaleToken) {
+                // Remove stale FCM token
+                await Device.updateOne(
+                  { deviceId: device.deviceId },
+                  { $unset: { fcmToken: '', fcmTokenUpdatedAt: '' } }
+                );
+                // console.log(`⚠️  Stale FCM token removed for ${device.deviceId}`);
+              }
+            } catch (err) {
+              // console.warn(`⚠️  Wake-up failed for ${device.deviceId}:`, err.message);
+            }
+          }
         }
       }
 
@@ -136,7 +162,7 @@ export async function handleStatusJob(data) {
         );
         if (result.modifiedCount > 0) {
           deactivatedCount += result.modifiedCount;
-          console.log(`🔌 DEACTIVATED ${result.modifiedCount} numbers from offline device ${device.deviceId}`);
+          // console.log(`🔌 DEACTIVATED ${result.modifiedCount} numbers from offline device ${device.deviceId}`);
         }
         continue;
       }
@@ -189,11 +215,11 @@ export async function handleStatusJob(data) {
 
           // Final validation
           if (invalidReason || !isValidIndianMobile(finalNumber)) {
-            console.log(`⚠️  INVALID  ${device.deviceId} SIM${sim.slot} → "${originalInput}"`);
-            console.log(`   Reason: ${invalidReason || 'Unknown error'}`);
-            if (finalNumber !== phoneNumber) {
-              console.log(`   Processed: "${phoneNumber}" → "${finalNumber}"`);
-            }
+            // console.log(`⚠️  INVALID  ${device.deviceId} SIM${sim.slot} → "${originalInput}"`);
+            // console.log(`   Reason: ${invalidReason || 'Unknown error'}`);
+            // if (finalNumber !== phoneNumber) {
+            //   console.log(`   Processed: "${phoneNumber}" → "${finalNumber}"`);
+            // }
             continue;
           }
 
@@ -211,7 +237,7 @@ export async function handleStatusJob(data) {
             );
             oldNumbers.forEach(old => {
               const wasActive = old.active ? ' (was active)' : ' (was inactive)';
-              console.log(`🔄 CLEANUP  ${old.number}${wasActive} → ${numberValue}  (${port})`);
+              // console.log(`🔄 CLEANUP  ${old.number}${wasActive} → ${numberValue}  (${port})`);
             });
             numberChangedCount += oldNumbers.length;
           }
@@ -254,7 +280,7 @@ export async function handleStatusJob(data) {
           $set: { active: false, signal: 0 }
         });
         deactivatedCount++;
-        console.log(`🗑️  STALE    ${num.number}  (${num.port})`);
+        // console.log(`🗑️  STALE    ${num.number}  (${num.port})`);
       }
     }
 
@@ -280,7 +306,7 @@ export async function handleStatusJob(data) {
         { lastRun: new Date() },
         { upsert: true }
       );
-      console.log('[Sync] CronStatus updated');
+      // console.log('[Sync] CronStatus updated');
     } catch (cronErr) {
       console.error('[Sync] Failed to update CronStatus:', cronErr.message);
     }

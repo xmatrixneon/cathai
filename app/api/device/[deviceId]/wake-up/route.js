@@ -56,9 +56,9 @@ export async function POST(request, { params }) {
     }
 
     // Send wake-up notification
-    const success = await sendWakeUpNotification(deviceId, device.fcmToken);
+    const result = await sendWakeUpNotification(deviceId, device.fcmToken);
 
-    if (success) {
+    if (result.success) {
       return NextResponse.json({
         success: true,
         message: 'Wake-up notification sent successfully',
@@ -66,6 +66,22 @@ export async function POST(request, { params }) {
         deviceStatus: device.status,
         sentAt: new Date().toISOString()
       });
+    } else if (result.isStaleToken) {
+      // Remove stale token from database
+      await Device.updateOne(
+        { deviceId },
+        { $unset: { fcmToken: '', fcmTokenUpdatedAt: '' } }
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Device has an invalid FCM token. Token has been removed.',
+          deviceId,
+          deviceStatus: device.status,
+          staleTokenRemoved: true
+        },
+        { status: 400 }
+      );
     } else {
       return NextResponse.json(
         {
