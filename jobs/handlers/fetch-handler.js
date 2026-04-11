@@ -26,18 +26,31 @@ function buildSmartOtpRegexList(formats) {
   return formats
     .map((format) => {
       format = normalizeToSingleLine(format);
-      if (!format.includes("{otp}")) return null;
+      if (!format.includes("{otp")) return null;
 
       let pattern = escapeRegex(format);
 
       let isFirstOtp = true;
-      pattern = pattern.replace(/\\\{otp\\\}/gi, () => {
-        if (isFirstOtp) {
-          isFirstOtp = false;
-          return "(?<otp>[A-Za-z0-9\\-]{3,12})";
-        }
-        return "(?:[A-Za-z0-9\\-]{3,12})";
-      });
+
+      // Handle {otp5} - exactly 5 digits
+      if (format.includes("{otp5}")) {
+        pattern = pattern.replace(/\\\{otp5\\\}/gi, () => {
+          if (isFirstOtp) {
+            isFirstOtp = false;
+            return "(?<otp>\\d{5})";
+          }
+          return "(?:\\d{5})";
+        });
+      } else {
+        // Handle {otp} - 3-12 characters (original behavior)
+        pattern = pattern.replace(/\\\{otp\\\}/gi, () => {
+          if (isFirstOtp) {
+            isFirstOtp = false;
+            return "(?<otp>[A-Za-z0-9\\-]{3,12})";
+          }
+          return "(?:[A-Za-z0-9\\-]{3,12})";
+        });
+      }
 
       pattern = pattern.replace(/\\\{date\\\}/gi, ".*");
       pattern = pattern.replace(/\\\{datetime\\\}/gi, ".*");
