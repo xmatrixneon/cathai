@@ -34,16 +34,16 @@ function buildSmartOtpRegexList(formats) {
         return "(?:[A-Za-z0-9\\-]{3,12})";
       });
 
-      pattern = pattern.replace(/\\\{date\\\}/gi, ".*");
-      pattern = pattern.replace(/\\\{datetime\\\}/gi, ".*");
-      pattern = pattern.replace(/\\\{time\\\}/gi, ".*");
+      pattern = pattern.replace(/\\\{date\\\}/gi, ".*?");
+      pattern = pattern.replace(/\\\{datetime\\\}/gi, ".*?");
+      pattern = pattern.replace(/\\\{time\\\}/gi, ".*?");
       pattern = pattern.replace(/\\\{random\\\}/gi, "[A-Za-z0-9]{3,15}");
-      pattern = pattern.replace(/\\\{.*?\\\}/gi, ".*");
+      pattern = pattern.replace(/\\\{.*?\\\}/gi, ".*?");
 
       pattern = pattern
-        .replace(/\\s+/g, "\\s*")
+        .replace(/\\s+/g, "\\s+")
         .replace(/\\:/g, "[:：]?")
-        .replace(/\\\./g, ".*");
+        .replace(/\\\./g, ".*?");
 
       return new RegExp(pattern, "i");
     })
@@ -110,60 +110,53 @@ export async function POST(request) {
       attempts++;
 
       const prompt = `
-You are an expert SMS template generator. Convert the following SMS message into a template using the specific placeholder rules. The template must be compatible with our regex builder system and must successfully extract the OTP from the SMS.
+You are an expert SMS template generator. Convert the following SMS message into a template that works with our regex system.
 
-CRITICAL RULES:
-- You MUST use exactly ONE {otp} placeholder in the entire template
-- Using multiple {otp} placeholders will cause regex errors and template failure
-- If the SMS contains the OTP multiple times, choose the most appropriate one (usually the first occurrence)
-- The template MUST match the exact structure of the SMS, including punctuation and spacing
+CRITICAL RULES (follow exactly):
+- Use exactly ONE {otp} placeholder for the OTP code
+- Keep the template SIMPLE and FOCUSED - only include essential parts to locate the OTP
+- Do NOT try to match the entire SMS perfectly - focus on finding the OTP reliably
 
-Special placeholders supported:
-- {otp} → (?<otp>[A-Za-z0-9\-]{3,12}) - Use for OTP digits/alphanumeric (ONLY ONE PER TEMPLATE)
-- {date} / {datetime} / {time} → .* - Use for durations, dates, times
-- {random} → [A-Za-z0-9]{3,15} - Use for purely alphanumeric random strings (no special chars like /+)
-- {any} → .* - Use as fallback for anything else (links, tokens with special chars, repeated OTP references)
+Placeholders (use only when needed):
+- {otp} - For the OTP/delivery/verification code (digits or alphanumeric, 3-12 characters)
+- {any} - For anything else that varies (amounts, dates, URLs, random strings, etc.)
+- {random} - For purely alphanumeric random tokens (no special chars like /+.)
 
-Additional Rules:
-1. Always replace OTP digits/alpha with {otp} (but only once)
-2. Durations → {time}
-3. Random purely alphanumeric → {random}
-4. Random with /, +, . → {any}
-5. Keep static text exactly as-is
-6. Spaces collapse into \\s*
-7. : matches : or ：
-8. . matches .*
-9. # symbols should be preserved or handled with {any} if followed by numbers
-10. @ symbols in URLs should be preserved or handled with {any}
+TEMPLATE SIMPLIFICATION STRATEGY:
+1. Find the OTP/delivery code in the SMS
+2. Include 3-5 words BEFORE the OTP
+3. Include 3-5 words AFTER the OTP
+4. Replace everything else with {any}
 
-Example 1:
+Examples showing simplification:
+
+Example 1 (OTP SMS):
 SMS: "<#> 1770 is your OTP to login into Airtel Thanks app. Valid for 100 secs. Do not share with anyone. If this was not you click i.airtel.in/Contact N9BWuqauU1y"
-Template: "<#> {otp} is your OTP to login into Airtel Thanks app. Valid for {time}. Do not share with anyone. If this was not you click {any} {random}"
+Template: "<#> {otp} is your OTP to login into {any}. Valid for {time}. Do not share with anyone."
 
-Example 2 (SPECIFIC FOR REPEATED OTP):
-SMS: "Dear customer, 5672 is the one Time Password from Vi. Expires in 3 min. Please do not share this OTP with anyone.OTP @www.myvi.in #5672"
-Template: "Dear customer, {otp} is the one Time Password from Vi. Expires in {time}. Please do not share this OTP with anyone.OTP @www.myvi.in #{any}"
+Example 2 (Delivery code SMS):
+SMS: "Your delivery code is 123456. Show this to the delivery agent at the time of delivery."
+Template: "Your delivery code is {otp}. Show this to {any}."
 
-${validationResult && !validationResult.valid ? `Previous attempt failed: ${validationResult.reason}.
+Example 3 (OTP appears multiple times):
+SMS: "Dear customer, 5672 is your OTP. Expires in 3 min. Do not share. Reference #5672"
+Template: "Dear customer, {otp} is your OTP. Expires in {time}. Do not share."
 
-ANALYSIS: The generated template did not work with our regex system. ${validationResult.reason.includes('multiple') ? 'The template contained multiple {otp} placeholders which is not allowed.' : 'The template could not extract the OTP from the SMS.'}
+Example 4 (Amount included):
+SMS: "Order delivered. Pay Rs 450.0 using code 789012 before expiry."
+Template: "Order delivered. Pay {any} using code {otp} before {any}."
 
-Please generate a new template that:
-- Contains exactly ONE {otp} placeholder
-- Matches the SMS structure precisely including punctuation and spacing
-- Uses {any} for any repeated OTP references (like #5672 at the end)
-- Uses {time} for durations like "3 min"
-- Preserves all static text exactly as-is
-- Handles @ symbols in URLs with {any}
-- Handles # symbols followed by numbers with {any}
+For YOUR SMS, apply the simplification strategy:
+1. Find the OTP/delivery/verification code
+2. Keep minimal context around it (3-5 words before/after)
+3. Replace all other varying parts with {any}
 
-Focus on replacing only the first occurrence of the OTP with {otp} and use {any} for any subsequent occurrences or URL fragments.` : ''}
-
-Now convert this SMS:
+SMS to convert:
 "${smsText}"
 
 Return ONLY the template string, nothing else.
 `;
+
 
       const completion = await openai.chat.completions.create({
         model: "deepseek-chat",
@@ -183,6 +176,8 @@ Return ONLY the template string, nothing else.
 
       template = completion.choices[0]?.message?.content?.trim();
 
+      console.log(`[Template Gen] Attempt ${attempts}: Generated template = "${template}"`);
+
       if (!template) {
         console.error('OpenAI API completion response:', JSON.stringify(completion, null, 2));
         throw new Error(`Failed to generate template. API response: ${completion.choices?.length || 0} choices returned`);
@@ -193,6 +188,7 @@ Return ONLY the template string, nothing else.
 
       // Validate the generated template
       validationResult = validateTemplate(template, smsText);
+      console.log(`[Template Gen] Attempt ${attempts}: Validation result =`, validationResult);
 
     } while (!validationResult.valid && attempts < maxAttempts);
 

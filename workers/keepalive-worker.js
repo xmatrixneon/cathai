@@ -14,6 +14,21 @@ import { getWorkerConcurrency } from '../jobs/utils/job-options.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Delay to use when scheduling next job after a failure (to prevent rapid retry loops)
+const ERROR_RETRY_DELAY = parseInt(process.env.BULLMQ_ERROR_RETRY_DELAY || '30000', 10);
+
+// Global error handlers to prevent worker crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Keepalive] Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit - let PM2 restart if needed
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[Keepalive] Uncaught Exception:', error);
+  // Exit to let PM2 restart with clean state
+  process.exit(1);
+});
+
 // Load environment variables
 config({ path: join(__dirname, '..', '.env.local') });
 config({ path: join(__dirname, '..', '.env') });
@@ -46,8 +61,10 @@ const worker = new Worker('device-keepalive', async (job) => {
   return withJobLogging(job, async () => {
     const result = await handleKeepaliveJob(job.data);
 
-    // Schedule next run if this was a scheduled job and successful
-    if (job.data.type === 'scheduled' && result.success) {
+    // Schedule next run for scheduled jobs (regardless of success/failure)
+    if (job.data.type === 'scheduled') {
+      // Use longer delay on failure to prevent rapid retry loops
+      const delay = result.success ? KEEPALIVE_INTERVAL : ERROR_RETRY_DELAY;
       await keepaliveQueue.add(
         'device-keepalive',
         {
@@ -55,7 +72,7 @@ const worker = new Worker('device-keepalive', async (job) => {
           runId: crypto.randomUUID(),
           startedAt: Date.now(),
         },
-        { delay: KEEPALIVE_INTERVAL }
+        { delay }
       );
     }
 
@@ -72,6 +89,11 @@ worker.on('completed', (job) => {
 
 worker.on('failed', (job, err) => {
   console.error(`[Keepalive] Job ${job?.id} failed:`, err.message);
+});
+
+worker.on('error', (error) => {
+  console.error('[Keepalive] Worker error:', error.message);
+  // Continue processing other jobs
 });
 
 // Graceful shutdown

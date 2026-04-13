@@ -26,7 +26,7 @@ function buildSmartOtpRegexList(formats) {
   return formats
     .map((format) => {
       format = normalizeToSingleLine(format);
-      if (!format.includes("{otp")) return null;
+      if (!format.includes("{otp}")) return null;
 
       let pattern = escapeRegex(format);
 
@@ -52,16 +52,16 @@ function buildSmartOtpRegexList(formats) {
         });
       }
 
-      pattern = pattern.replace(/\\\{date\\\}/gi, ".*");
-      pattern = pattern.replace(/\\\{datetime\\\}/gi, ".*");
-      pattern = pattern.replace(/\\\{time\\\}/gi, ".*");
+      pattern = pattern.replace(/\\\{date\\\}/gi, ".*?");
+      pattern = pattern.replace(/\\\{datetime\\\}/gi, ".*?");
+      pattern = pattern.replace(/\\\{time\\\}/gi, ".*?");
       pattern = pattern.replace(/\\\{random\\\}/gi, "[A-Za-z0-9]{3,15}");
-      pattern = pattern.replace(/\\\{.*?\\\}/gi, ".*");
+      pattern = pattern.replace(/\\\{.*?\\\}/gi, ".*?");
 
       pattern = pattern
-        .replace(/\\s+/g, "\\s*")
+        .replace(/\\s+/g, "\\s+")
         .replace(/\\:/g, "[:：]?")
-        .replace(/\\\./g, ".*");
+        .replace(/\\\./g, ".*?");
 
       return new RegExp(pattern, "i");
     })

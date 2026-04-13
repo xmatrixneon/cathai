@@ -14,6 +14,21 @@ import { getWorkerConcurrency } from '../jobs/utils/job-options.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Delay to use when scheduling next job after a failure (to prevent rapid retry loops)
+const ERROR_RETRY_DELAY = parseInt(process.env.BULLMQ_ERROR_RETRY_DELAY || '30000', 10);
+
+// Global error handlers to prevent worker crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Suspend] Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit - let PM2 restart if needed
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[Suspend] Uncaught Exception:', error);
+  // Exit to let PM2 restart with clean state
+  process.exit(1);
+});
+
 // Load environment variables
 config({ path: join(__dirname, '..', '.env.local') });
 config({ path: join(__dirname, '..', '.env') });
@@ -48,22 +63,24 @@ const worker = new Worker('quality-suspend', async (job) => {
     const result = await handleSuspendJob(job.data);
 
     // Schedule next run based on type (alternate between suspend and recovery)
-    if (result.success) {
-      const currentType = job.data.type || 'suspend-check';
-      const nextType = currentType === 'suspend-check' ? 'recovery-check' : 'suspend-check';
-      const nextInterval = nextType === 'suspend-check' ? SUSPEND_CHECK_INTERVAL : SUSPEND_RECOVER_INTERVAL;
+    // Continue regardless of success/failure to prevent worker from stopping
+    const currentType = job.data.type || 'suspend-check';
+    const nextType = currentType === 'suspend-check' ? 'recovery-check' : 'suspend-check';
+    const nextInterval = nextType === 'suspend-check' ? SUSPEND_CHECK_INTERVAL : SUSPEND_RECOVER_INTERVAL;
 
-      await suspendQueue.add(
-        'quality-suspend',
-        {
-          type: nextType,
-          subType: nextType,
-          runId: crypto.randomUUID(),
-          startedAt: Date.now(),
-        },
-        { delay: nextInterval }
-      );
-    }
+    // Use longer delay on failure to prevent rapid retry loops
+    const delay = result.success ? nextInterval : ERROR_RETRY_DELAY;
+
+    await suspendQueue.add(
+      'quality-suspend',
+      {
+        type: nextType,
+        subType: nextType,
+        runId: crypto.randomUUID(),
+        startedAt: Date.now(),
+      },
+      { delay }
+    );
 
     return result;
   });
@@ -78,6 +95,11 @@ worker.on('completed', (job) => {
 
 worker.on('failed', (job, err) => {
   console.error(`[Suspend] Job ${job?.id} failed:`, err.message);
+});
+
+worker.on('error', (error) => {
+  console.error('[Suspend] Worker error:', error.message);
+  // Continue processing other jobs
 });
 
 // Graceful shutdown

@@ -14,6 +14,21 @@ import { getWorkerConcurrency } from '../jobs/utils/job-options.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Delay to use when scheduling next job after a failure (to prevent rapid retry loops)
+const ERROR_RETRY_DELAY = parseInt(process.env.BULLMQ_ERROR_RETRY_DELAY || '30000', 10);
+
+// Global error handlers to prevent worker crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Fetch] Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit - let PM2 restart if needed
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[Fetch] Uncaught Exception:', error);
+  // Exit to let PM2 restart with clean state
+  process.exit(1);
+});
+
 // Load environment variables
 config({ path: join(__dirname, '..', '.env.local') });
 config({ path: join(__dirname, '..', '.env') });
@@ -31,8 +46,10 @@ const worker = new Worker('sms-fetch', async (job) => {
   return withJobLogging(job, async () => {
     const result = await handleFetchJob(job.data);
 
-    // Schedule next run if this was a scheduled job and successful
-    if (job.data.type === 'scheduled' && result.success) {
+    // Schedule next run for scheduled jobs (regardless of success/failure)
+    if (job.data.type === 'scheduled') {
+      // Use longer delay on failure to prevent rapid retry loops
+      const delay = result.success ? FETCH_INTERVAL : ERROR_RETRY_DELAY;
       await fetchQueue.add(
         'sms-fetch',
         {
@@ -40,7 +57,7 @@ const worker = new Worker('sms-fetch', async (job) => {
           runId: crypto.randomUUID(),
           startedAt: Date.now(),
         },
-        { delay: FETCH_INTERVAL }
+        { delay }
       );
     }
 
@@ -57,6 +74,11 @@ worker.on('completed', (job) => {
 
 worker.on('failed', (job, err) => {
   console.error(`[Fetch] Job ${job?.id} failed:`, err.message);
+});
+
+worker.on('error', (error) => {
+  console.error('[Fetch] Worker error:', error.message);
+  // Continue processing other jobs
 });
 
 // Graceful shutdown
