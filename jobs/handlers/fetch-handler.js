@@ -55,11 +55,11 @@ function buildSmartOtpRegexList(formats) {
       pattern = pattern.replace(/\\\{date\\\}/gi, ".*?");
       pattern = pattern.replace(/\\\{datetime\\\}/gi, ".*?");
       pattern = pattern.replace(/\\\{time\\\}/gi, ".*?");
-      pattern = pattern.replace(/\\\{random\\\}/gi, "[A-Za-z0-9]{3,15}");
+      pattern = pattern.replace(/\\\{random\\\}/gi, ".+?");
       pattern = pattern.replace(/\\\{.*?\\\}/gi, ".*?");
 
       pattern = pattern
-        .replace(/\\s+/g, "\\s+")
+        .replace(/\\s+/g, "\\s*")
         .replace(/\\:/g, "[:：]?")
         .replace(/\\\./g, ".*?");
 
