@@ -171,15 +171,15 @@ Return ONLY the template string, nothing else.
         messages: [
           {
             role: "system",
-            content: "You are an expert SMS template generator. Return ONLY the template string, no explanations. Ensure the template contains exactly one {otp} placeholder and can extract the OTP from the SMS. Follow the user's instructions precisely, especially about using only one {otp} and handling repeated OTPs with {any}."
+            content: "You are an expert SMS template generator. Return ONLY the template string, no explanations. Ensure the template contains exactly one {otp} placeholder and can extract the OTP from the SMS. Follow the user's instructions precisely, especially about using only one {otp} and handling repeated OTPs with {any}. IMPORTANT: Always return the FULL template including all parts of the original SMS message."
           },
           {
             role: "user",
             content: prompt
           }
         ],
-        max_tokens: 1000,
-        temperature: 1,
+        max_tokens: 2000,
+        temperature: 0.3,
       });
 
       template = completion.choices[0]?.message?.content?.trim();
