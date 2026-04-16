@@ -26,7 +26,8 @@ function buildSmartOtpRegexList(formats) {
   return formats
     .map((format) => {
       format = normalizeToSingleLine(format);
-      if (!format.includes("{otp}")) return null;
+      // Check for any OTP pattern: {otp}, {otp4}, {otp5}, {otp6}, etc.
+      if (!format.includes("{otp")) return null;
 
       let pattern = escapeRegex(format);
 
