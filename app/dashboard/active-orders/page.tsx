@@ -18,8 +18,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Input } from "@/components/ui/input"
 import { getCookie } from "@/utils/cookie"
-import { Loader2, RefreshCw, Activity, Clock, MessageSquare, Hash, Key, Calendar } from "lucide-react"
+import { Loader2, RefreshCw, Activity, Clock, MessageSquare, Hash, Key, Calendar, Search, X } from "lucide-react"
 
 interface ActiveOrder {
   id: string
@@ -53,13 +54,15 @@ export default function ActiveOrdersPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [numberSearch, setNumberSearch] = useState("")
   const perPage = 30
   const token = getCookie("token")
 
-  async function fetchOrders(page: number = currentPage) {
+  async function fetchOrders(page: number = currentPage, search: string = numberSearch) {
     try {
       setRefreshing(true)
-      const res = await fetch(`/api/overview/active-orders?page=${page}&limit=${perPage}`, {
+      const searchParam = search ? `&number=${encodeURIComponent(search)}` : ""
+      const res = await fetch(`/api/overview/active-orders?page=${page}&limit=${perPage}${searchParam}`, {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -79,13 +82,13 @@ export default function ActiveOrdersPage() {
   }
 
   useEffect(() => {
-    fetchOrders(1)
-  }, [])
+    fetchOrders(1, numberSearch)
+  }, [numberSearch])
 
   useEffect(() => {
-    const interval = setInterval(() => fetchOrders(currentPage), 15000) // Auto-refresh every 15s (reduced from 5s)
+    const interval = setInterval(() => fetchOrders(currentPage, numberSearch), 15000) // Auto-refresh every 15s (reduced from 5s)
     return () => clearInterval(interval)
-  }, [currentPage])
+  }, [currentPage, numberSearch])
 
   return (
     <div className="space-y-6">
@@ -101,13 +104,41 @@ export default function ActiveOrdersPage() {
         </div>
         <Button
           variant="outline"
-          onClick={fetchOrders}
+          onClick={() => fetchOrders()}
           disabled={refreshing}
         >
           <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
+
+      {/* Search Bar */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex gap-2">
+            <div className="relative max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by number..."
+                value={numberSearch}
+                onChange={(e) => {
+                  setNumberSearch(e.target.value)
+                  setCurrentPage(1)
+                }}
+                className="pl-10 pr-10"
+              />
+              {numberSearch && (
+                <button
+                  onClick={() => setNumberSearch("")}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -135,7 +166,7 @@ export default function ActiveOrdersPage() {
                 <Activity className="h-16 w-16 mx-auto mb-4 opacity-50" />
                 <p>No active orders found</p>
               </div>
-              <Button variant="outline" onClick={fetchOrders}>
+              <Button variant="outline" onClick={() => fetchOrders()}>
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Refresh
               </Button>

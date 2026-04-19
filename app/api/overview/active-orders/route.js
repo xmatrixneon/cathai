@@ -16,20 +16,27 @@ export async function GET(req) {
       return NextResponse.json({ error: err.error }, { status: err.status || 401 })
     }
 
-    // Parse pagination parameters
+    // Parse pagination and search parameters
     const { searchParams } = new URL(req.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = Math.min(parseInt(searchParams.get('limit') || '30'), 100); // Max 100 per page
     const skip = (page - 1) * limit;
+    const numberSearch = searchParams.get('number');
+
+    // Build query filter
+    const baseFilter = { active: true };
+    const filter = numberSearch
+      ? { ...baseFilter, number: { $regex: numberSearch, $options: 'i' } }
+      : baseFilter;
 
     // Fetch active orders with server-side pagination
     const [activeOrders, total] = await Promise.all([
-      Orders.find({ active: true })
+      Orders.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      Orders.countDocuments({ active: true })
+      Orders.countDocuments(filter)
     ]);
 
     // Fetch service names in bulk
