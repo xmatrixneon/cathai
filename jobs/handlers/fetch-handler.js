@@ -33,14 +33,17 @@ function buildSmartOtpRegexList(formats) {
 
       let isFirstOtp = true;
 
-      // Handle {otp5} - exactly 5 digits
-      if (format.includes("{otp5}")) {
-        pattern = pattern.replace(/\\\{otp5\\\}/gi, () => {
+      // Handle fixed-length OTP patterns: {otp4}, {otp5}, {otp6}, {otp7}, {otp8}
+      // Check for {otp followed by a digit
+      const fixedOtpMatch = format.match(/\{otp(\d+)\}/);
+      if (fixedOtpMatch) {
+        const length = parseInt(fixedOtpMatch[1], 10);
+        pattern = pattern.replace(/\\\{otp\d+\\\}/gi, () => {
           if (isFirstOtp) {
             isFirstOtp = false;
-            return "(?<otp>\\d{5})";
+            return `(?<otp>\\b\\d{${length}}\\b)`;
           }
-          return "(?:\\d{5})";
+          return `(?:\\b\\d{${length}}\\b)`;
         });
       } else {
         // Handle {otp} - 3-12 characters (original behavior)
