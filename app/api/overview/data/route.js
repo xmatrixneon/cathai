@@ -4,13 +4,13 @@ import Numbers from "@/models/Numbers"; // adjust path
 import Orders from "@/models/Orders";   // adjust path
 import dbConnect from "@/lib/db";       // your db connection util
 import CronStatus  from "@/models/Cron";
-import { getCached } from "@/lib/cache";
+import { getCached, CACHE_TTL } from "@/lib/cache";
 
 export async function GET() {
   try {
     await dbConnect(); // ensure MongoDB is connected
 
-    // Use caching with 30-second TTL for dashboard data
+    // Use caching with 5-minute TTL for dashboard data (OPTIMIZED for 62GB RAM)
     const data = await getCached('dashboard:overview:data', async () => {
       // Parallelize all queries for better performance
       const [totalNumbers, activeOrders, occupiedNumbers, totalActivations, cronStatuses] =
@@ -56,7 +56,7 @@ export async function GET() {
         lastcron: lastcron,          // fetchOrders cron
         lastsync: lastsync           // syncStatus cron
       };
-    }, 30); // 30 second TTL
+    }, CACHE_TTL.OVERVIEW_STATS); // 5 minute TTL - optimized for 62GB RAM
 
     return NextResponse.json(data);
 

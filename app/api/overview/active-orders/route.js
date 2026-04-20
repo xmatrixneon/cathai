@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import Orders from "@/models/Orders";
 import Services from "@/models/Service";
 import dbConnect from "@/lib/db";
-import { verify } from "@/lib/verify"
+import { verify } from "@/lib/verify";
+import { getCached, buildPaginatedKey, CACHE_TTL } from "@/lib/cache";
 
 export async function GET(req) {
   try {
@@ -22,6 +23,14 @@ export async function GET(req) {
     const limit = Math.min(parseInt(searchParams.get('limit') || '30'), 100); // Max 100 per page
     const skip = (page - 1) * limit;
     const numberSearch = searchParams.get('number');
+
+    // Build cache key from request parameters
+    const cacheKey = buildPaginatedKey('active:orders', {
+      number: numberSearch,
+    }, { page, limit });
+
+    // Use caching with 30-second TTL (orders change frequently)
+    const result = await getCached(cacheKey, async () => {
 
     // Build query filter
     const baseFilter = { active: true };
@@ -43,13 +52,14 @@ export async function GET(req) {
         }
       : baseFilter;
 
-    // Fetch active orders with server-side pagination
+    // Fetch active orders with server-side pagination - OPTIMIZED with projection
     const [activeOrders, total] = await Promise.all([
       Orders.find(filter)
+        .select('number dialcode isused ismultiuse nextsms message keywords formate createdAt updatedAt serviceid') // Only fetch needed fields
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .lean(),
+        .lean(), // Use lean() for better performance (no Mongoose overhead)
       Orders.countDocuments(filter)
     ]);
 
@@ -91,7 +101,7 @@ export async function GET(req) {
 
     const totalPages = Math.ceil(total / limit);
 
-    return NextResponse.json({
+    return {
       orders,
       pagination: {
         page,
@@ -99,7 +109,10 @@ export async function GET(req) {
         total,
         totalPages
       }
-    });
+    };
+    }, CACHE_TTL.ACTIVE_ORDERS); // 30 second TTL - orders change frequently
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error("Active Orders API error:", error);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

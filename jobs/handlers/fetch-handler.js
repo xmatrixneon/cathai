@@ -187,8 +187,9 @@ export async function handleFetchJob(data) {
 
     // === PROCESS EACH ORDER (no DB queries, just in-memory lookup) ===
     const orderUpdates = [];
-    const numberQualityUpdates = [];
-    const locksToCreate = [];
+    const numberQualityUpdates = []; // Quality updates to batch later
+    const locksToCreate = []; // Locks to create in batch
+    const immediateQualityUpdates = []; // Quality updates for expiring orders
 
     for (const order of activeOrders) {
       processed++;
@@ -229,9 +230,14 @@ export async function handleFetchJob(data) {
           }
         });
 
-        // Update number quality ONLY if no-recharge failure
+        // Collect number quality update for batch processing
         if (qualityImpact !== 0 && order.isused !== true) {
-          await updateNumberQuality(order.number, qualityImpact, failureReason, order._id);
+          immediateQualityUpdates.push({
+            number: order.number,
+            impact: qualityImpact,
+            reason: failureReason,
+            orderId: order._id
+          });
         }
 
         // console.log(`[Fetch] Order ${order._id} expired (${ageMinutes.toFixed(1)}min) - ${failureReason}`);
@@ -371,36 +377,41 @@ export async function handleFetchJob(data) {
             updateFields.failureReason = 'none';
             updateFields.qualityImpact = 5; // +5 points for success
 
-            // Record number state snapshot
-            const numDoc = await Numbers.findOne({ number: order.number });
+            // Use simple snapshot (actual values will be updated via quality tracking)
             updateFields.numberSnapshot = {
-              qualityScore: numDoc ? (numDoc.qualityScore || 100) : 100,
-              consecutiveFailures: numDoc ? (numDoc.consecutiveFailures || 0) : 0,
-              signal: 0 // Can be enhanced later
+              qualityScore: 100, // Will be corrected by quality update
+              consecutiveFailures: 0,
+              signal: 0
             };
 
-            // Update number quality
-            await updateNumberQuality(order.number, 5, 'otp_received', order._id);
+            // Collect quality update for batch processing
+            numberQualityUpdates.push({
+              number: order.number,
+              impact: 5,
+              reason: 'otp_received',
+              orderId: order._id
+            });
 
-            // Create lock
-            const newLock = new Lock({
+            // Collect lock for batch creation
+            locksToCreate.push({
               number: order.number,
               countryid: order.countryid,
               serviceid: order.serviceid,
               locked: true,
             });
 
-            await newLock.save();
-            // console.log(`[Fetch] Order ${order._id} - first OTP received → marking as used + creating lock`);
+            // console.log(`[Fetch] Order ${order._id} - first OTP collected for batch processing`);
           }
 
-          await Orders.updateOne(
-            { _id: order._id },
-            {
-              $set: updateFields,
-              $addToSet: { message: msg.message }
+          orderUpdates.push({
+            updateOne: {
+              filter: { _id: order._id },
+              update: {
+                $set: updateFields,
+                $addToSet: { message: msg.message }
+              }
             }
-          );
+          });
 
           // console.log(`[Fetch] Order ${order._id} - saved OTP: ${otpFound}`);
           break; // save only one OTP per run
@@ -416,6 +427,102 @@ export async function handleFetchJob(data) {
     if (orderUpdates.length > 0) {
       const updateResult = await Orders.bulkWrite(orderUpdates, { ordered: false });
       // console.log(`[Fetch] Bulk update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
+    }
+
+    // === BATCH NUMBER QUALITY UPDATES (ONE QUERY FOR ALL NUMBERS) ===
+    const allQualityUpdates = [...immediateQualityUpdates, ...numberQualityUpdates];
+    if (allQualityUpdates.length > 0) {
+      // Group updates by number to avoid duplicate updates
+      const qualityByNumber = new Map();
+      const allNumbersToUpdate = new Set();
+
+      for (const qu of allQualityUpdates) {
+        const key = qu.number.toString();
+        allNumbersToUpdate.add(key);
+        if (!qualityByNumber.has(key)) {
+          qualityByNumber.set(key, { impact: 0, count: 0, orders: [] });
+        }
+        const entry = qualityByNumber.get(key);
+        entry.impact += qu.impact;
+        entry.count++;
+        entry.orders.push({ orderId: qu.orderId, reason: qu.reason });
+      }
+
+      // ONE QUERY to fetch ALL numbers we need
+      const numbersArray = Array.from(allNumbersToUpdate);
+      const numberDocs = await Numbers.find({ number: { $in: numbersArray } }).lean();
+
+      // Build a map for fast lookup
+      const numbersMap = new Map();
+      for (const numDoc of numberDocs) {
+        numbersMap.set(numDoc.number.toString(), numDoc);
+      }
+      // console.log(`[Fetch] Fetched ${numbersMap.size} numbers in 1 query for quality updates`);
+
+      // Prepare bulk operations using the fetched data
+      const qualityBulkOps = [];
+      for (const [number, data] of qualityByNumber) {
+        const numDoc = numbersMap.get(number);
+        if (!numDoc) continue;
+
+        const now = new Date();
+        const currentScore = numDoc.qualityScore || 100;
+        const currentConsecutive = numDoc.consecutiveFailures || 0;
+        const currentFailures = numDoc.failureCount || 0;
+        const currentSuccess = numDoc.successCount || 0;
+
+        let newScore = Math.max(0, Math.min(100, currentScore + data.impact));
+        let newConsecutive = data.impact > 0 ? 0 : currentConsecutive + 1;
+        let newFailures = currentFailures + (data.impact < 0 ? 1 : 0);
+        let newSuccess = currentSuccess + (data.impact > 0 ? 1 : 0);
+
+        // Build recent failures array
+        const recentFailures = [...(numDoc.recentFailures || [])];
+        for (const ord of data.orders) {
+          if (ord.reason !== 'otp_received') {
+            recentFailures.push({
+              orderId: ord.orderId,
+              serviceid: numDoc.serviceid || null,
+              countryid: numDoc.countryid || null,
+              failedAt: now,
+              reason: ord.reason
+            });
+          }
+        }
+        // Keep only last 50
+        while (recentFailures.length > 50) {
+          recentFailures.shift();
+        }
+
+        qualityBulkOps.push({
+          updateOne: {
+            filter: { number },
+            update: {
+              $set: {
+                qualityScore: newScore,
+                failureCount: newFailures,
+                successCount: newSuccess,
+                consecutiveFailures: newConsecutive,
+                lastFailureAt: data.impact < 0 ? now : numDoc.lastFailureAt,
+                lastSuccessAt: data.impact > 0 ? now : numDoc.lastSuccessAt,
+                recentFailures: recentFailures,
+                lastQualityCheck: now
+              }
+            }
+          }
+        });
+      }
+
+      if (qualityBulkOps.length > 0) {
+        await Numbers.bulkWrite(qualityBulkOps, { ordered: false });
+        // console.log(`[Fetch] Batch updated ${qualityBulkOps.length} number quality records`);
+      }
+    }
+
+    // === BATCH LOCK CREATIONS ===
+    if (locksToCreate.length > 0) {
+      await Lock.insertMany(locksToCreate, { ordered: false });
+      // console.log(`[Fetch] Batch created ${locksToCreate.length} locks`);
     }
 
     console.log(`[Fetch] Job completed - processed: ${processed}, otpsFound: ${otpsFound}`);

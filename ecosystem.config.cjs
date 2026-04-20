@@ -48,7 +48,7 @@ module.exports = {
     {
       name: 'worker:fetch',
       script: 'workers/fetch-worker.js',
-      instances: 1,
+      instances: 2, // 2 instances for high traffic
       env: {
         BULLMQ_FETCH_ENABLED: 'true',
         BULLMQ_CONCURRENCY_SMS_FETCH: String(highConcurrencyWorkers), // 24 concurrent jobs (was 12)

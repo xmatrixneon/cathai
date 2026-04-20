@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import connectDB from '@/lib/db'
 import Service from '@/models/Service'
 import { verify } from "@/lib/verify"
-import { getCached } from "@/lib/cache"
+import { getCached, CACHE_TTL } from "@/lib/cache"
 
 export async function GET(req) {
   await connectDB()
@@ -13,10 +13,10 @@ export async function GET(req) {
     return NextResponse.json({ error: result.error }, { status: result.status || 401 });
   }
 
-  // Cache services for 5 minutes (invalidated on updates)
+  // Cache services for 1 hour (rarely change, invalidated on updates)
   const services = await getCached('static:services', async () => {
     return await Service.find().lean()
-  }, 300)
+  }, CACHE_TTL.SERVICES_LIST)
 
   return NextResponse.json(services)
 }
