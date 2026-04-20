@@ -25,8 +25,22 @@ export async function GET(req) {
 
     // Build query filter
     const baseFilter = { active: true };
+    // For number search, we need to use $expr with $toString since 'number' is a numeric field
     const filter = numberSearch
-      ? { ...baseFilter, number: { $regex: numberSearch, $options: 'i' } }
+      ? {
+          $and: [
+            { active: true },
+            {
+              $expr: {
+                $regexMatch: {
+                  input: { $toString: "$number" },
+                  regex: numberSearch,
+                  options: "i"
+                }
+              }
+            }
+          ]
+        }
       : baseFilter;
 
     // Fetch active orders with server-side pagination

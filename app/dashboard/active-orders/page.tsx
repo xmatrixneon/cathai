@@ -68,13 +68,37 @@ export default function ActiveOrdersPage() {
           Authorization: `Bearer ${token}`,
         },
       })
+
+      // Check response status before parsing
+      if (!res.ok) {
+        const errorData = await res.json()
+        console.error("API Error:", errorData.error || res.statusText)
+        setOrders([])
+        setTotalPages(0)
+        setTotal(0)
+        return
+      }
+
       const data: ActiveOrdersResponse = await res.json()
-      setOrders(data.orders)
+
+      // Validate response structure
+      if (!data || !data.pagination) {
+        console.error("Invalid response structure:", data)
+        setOrders([])
+        setTotalPages(0)
+        setTotal(0)
+        return
+      }
+
+      setOrders(data.orders || [])
       setTotalPages(data.pagination.totalPages)
       setTotal(data.pagination.total)
       setCurrentPage(data.pagination.page)
     } catch (err) {
       console.error("Error fetching active orders:", err)
+      setOrders([])
+      setTotalPages(0)
+      setTotal(0)
     } finally {
       setLoading(false)
       setRefreshing(false)
