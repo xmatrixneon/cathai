@@ -56,15 +56,15 @@ export async function POST(req) {
   }
 }
 
-// GET route for listing last 200 messages from last 2 days (IST)
+// GET route for listing last 500 messages from last 2 days (IST)
 export async function GET() {
   try {
     await connectDB()
 
-    // ✅ Fetch last 200 messages, newest first
+    // ✅ Fetch last 500 messages, newest first
     const messages = await Message.find({})
       .sort({ createdAt: -1 }) // newest first
-      .limit(200) // limit to 200 messages
+      .limit(500) // limit to 500 messages
 
     return NextResponse.json({ success: true, data: messages }, { status: 200 })
   } catch (error) {

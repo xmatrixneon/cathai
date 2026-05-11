@@ -68,6 +68,9 @@ server {
         # Bypass cache for WebSocket upgrades
         proxy_cache_bypass $http_upgrade;
 
+        # Disable proxy buffering for real-time updates
+        proxy_buffering off;
+
         # Cloudflare specific headers
         proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
         proxy_set_header CF-Visitor $http_cf_visitor;

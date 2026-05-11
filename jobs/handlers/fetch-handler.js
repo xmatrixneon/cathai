@@ -196,8 +196,8 @@ export async function handleFetchJob(data) {
       const now = new Date();
       const ageMinutes = (now - order.createdAt) / (1000 * 60);
 
-      // 1. Expire after 15 min
-      if (ageMinutes > 15) {
+      // 1. Expire after 20 min
+      if (ageMinutes > 20) {
         // Determine failure reason and quality impact
         let failureReason;
         let qualityImpact;

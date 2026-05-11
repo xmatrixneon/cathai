@@ -63,5 +63,8 @@ server {
 
         # Bypass cache for WebSocket upgrades
         proxy_cache_bypass $http_upgrade;
+
+        # Disable proxy buffering for real-time updates
+        proxy_buffering off;
     }
 }

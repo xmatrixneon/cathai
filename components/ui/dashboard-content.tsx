@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { ActivationActionChart } from "@/components/dashboard-chat"
 import { TodaySuccessChart } from "@/components/bar-chart"
 import { getCookie } from "@/utils/cookie"
-import { Users, Activity, Building, Zap, Clock, RefreshCw, Home, BarChart3 } from "lucide-react"
+import { Users, Activity, Building, Zap, Clock, RefreshCw, Home, BarChart3, Smartphone, TrendingUp, TrendingDown } from "lucide-react"
 
 export default function DashboardContent() {
   const token = getCookie("token")
@@ -20,19 +20,32 @@ export default function DashboardContent() {
     lastcron: string
     lastsync: string
   } | null>(null)
+  const [deviceStats, setDeviceStats] = useState<{
+    today: { total: number; online: number; offline: number }
+    yesterday: { total: number; online: number; offline: number }
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   const fetchData = async () => {
     try {
-      const res = await fetch("/api/overview/data", {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      })
-      const json = await res.json()
-      setData(json)
+      const [overviewRes, deviceRes] = await Promise.all([
+        fetch("/api/overview/data", {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch("/api/overview/device-stats", {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        })
+      ])
+      const [overview, device] = await Promise.all([overviewRes.json(), deviceRes.json()])
+      setData(overview)
+      setDeviceStats(device)
     } catch (err) {
       console.error("Error fetching overview:", err)
     } finally {
@@ -174,6 +187,91 @@ export default function DashboardContent() {
               <CardContent>
                 <div className="text-3xl font-bold">{data ? data.totalActivations : "-"}</div>
                 <p className="text-xs text-muted-foreground">Total successful activations</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Device Registration Stats */}
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Smartphone className="h-4 w-4" />
+                  Today Registrations
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{deviceStats ? deviceStats.today.total : "-"}</div>
+                <p className="text-xs text-muted-foreground">
+                  Online: {deviceStats?.today.online || 0} | Offline: {deviceStats?.today.offline || 0}
+                </p>
+                {deviceStats && deviceStats.yesterday.total > 0 && (
+                  <div className="flex items-center mt-1">
+                    {deviceStats.today.total >= deviceStats.yesterday.total ? (
+                      <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
+                    ) : (
+                      <TrendingDown className="h-3 w-3 text-red-500 mr-1" />
+                    )}
+                    <span className={`text-xs ${deviceStats.today.total >= deviceStats.yesterday.total ? 'text-green-600' : 'text-red-600'}`}>
+                      {deviceStats.yesterday.total > 0
+                        ? `${((deviceStats.today.total - deviceStats.yesterday.total) / deviceStats.yesterday.total * 100).toFixed(0)}% vs yesterday`
+                        : 'New baseline'}
+                    </span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  Yesterday
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{deviceStats ? deviceStats.yesterday.total : "-"}</div>
+                <p className="text-xs text-muted-foreground">
+                  Online: {deviceStats?.yesterday.online || 0} | Offline: {deviceStats?.yesterday.offline || 0}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Activity className="h-4 w-4" />
+                  Today Online Rate
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {deviceStats && deviceStats.today.total > 0
+                    ? `${(deviceStats.today.online / deviceStats.today.total * 100).toFixed(0)}%`
+                    : "-"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {deviceStats?.today.online || 0} of {deviceStats?.today.total || 0} devices online
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Building className="h-4 w-4" />
+                  Yesterday Online Rate
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {deviceStats && deviceStats.yesterday.total > 0
+                    ? `${(deviceStats.yesterday.online / deviceStats.yesterday.total * 100).toFixed(0)}%`
+                    : "-"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {deviceStats?.yesterday.online || 0} of {deviceStats?.yesterday.total || 0} devices online
+                </p>
               </CardContent>
             </Card>
           </div>
