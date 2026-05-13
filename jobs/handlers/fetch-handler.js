@@ -364,6 +364,52 @@ export async function handleFetchJob(data) {
           }
         }
 
+        // Fallback: if no OTP found, check for brand name in ANY formate element
+        if (!otpFound && order.formate && order.formate.length > 0) {
+          const formateArray = Array.isArray(order.formate) ? order.formate : [order.formate];
+
+          // Try each formate element as a potential brand name
+          for (const formateText of formateArray) {
+            const cleanFormate = normalizeToSingleLine(formateText);
+
+            // Skip if formate has {otp} patterns (already tried via regex)
+            if (cleanFormate.includes("{otp")) continue;
+
+            // Check if brand name exists in message (case-insensitive)
+            if (cleanFormate && cleanMessage.toLowerCase().includes(cleanFormate.toLowerCase())) {
+              // Find all 4-8 digit numbers in the message
+              const allNumbers = [];
+              let match;
+              const numberRegex = /\b(\d{4,8})\b/g;
+              while ((match = numberRegex.exec(cleanMessage)) !== null) {
+                allNumbers.push({
+                  number: match[1],
+                  index: match.index
+                });
+              }
+
+              if (allNumbers.length > 0) {
+                // Find the number closest to the brand name
+                const brandIndex = cleanMessage.toLowerCase().indexOf(cleanFormate.toLowerCase());
+                let closestNumber = allNumbers[0];
+                let minDistance = Math.abs(allNumbers[0].index - brandIndex);
+
+                for (const num of allNumbers) {
+                  const distance = Math.abs(num.index - brandIndex);
+                  if (distance < minDistance) {
+                    minDistance = distance;
+                    closestNumber = num;
+                  }
+                }
+
+                otpFound = closestNumber.number;
+                console.log(`[Fetch] Order ${order._id} - extracted OTP via brand name fallback (${cleanFormate}): ${otpFound}`);
+                break; // Found OTP, stop checking other formate elements
+              }
+            }
+          }
+        }
+
         if (otpFound) {
           otpsFound++;
           const updateFields = {
