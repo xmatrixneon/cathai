@@ -160,8 +160,8 @@ export async function handleFetchJob(data) {
     const minCreatedAt = activeOrders.reduce((min, order) =>
       order.createdAt < min ? order.createdAt : min, activeOrders[0].createdAt);
 
-    // Look back 3 minutes from the oldest order
-    const sinceTime = new Date(minCreatedAt.getTime() - 180000);
+    // No lookback - order must exist before SMS
+    const sinceTime = new Date(minCreatedAt.getTime());
 
     console.log(`[Fetch] Fetching all messages since ${sinceTime.toISOString()} (BATCH QUERY)`);
 
@@ -289,7 +289,7 @@ export async function handleFetchJob(data) {
         messages = exactMatches.filter(msg => {
           const orderTime = order.createdAt.getTime();
           const msgTime = new Date(msg.time || msg.createdAt || Date.now()).getTime();
-          return msgTime >= orderTime - 180000 && msgTime <= orderTime + 900000;
+          return msgTime >= orderTime && msgTime <= orderTime + 1200000;
         });
       }
 
@@ -303,7 +303,7 @@ export async function handleFetchJob(data) {
             const partialMatches = msgs.filter(msg => {
               const orderTime = order.createdAt.getTime();
               const msgTime = new Date(msg.time || msg.createdAt || Date.now()).getTime();
-              return msgTime >= orderTime - 180000 && msgTime <= orderTime + 900000;
+              return msgTime >= orderTime && msgTime <= orderTime + 1200000;
             });
 
             if (partialMatches.length > 0) {
