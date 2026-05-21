@@ -9,8 +9,8 @@ export const jobOptions = {
       type: 'exponential',
       delay: 5000,
     },
-    removeOnComplete: 100,
-    removeOnFail: 500,
+    removeOnComplete: { count: 0 },
+    removeOnFail: { count: 50 },
   },
   'device-status': {
     attempts: 3,
@@ -18,8 +18,8 @@ export const jobOptions = {
       type: 'exponential',
       delay: 5000,
     },
-    removeOnComplete: 50,
-    removeOnFail: 250,
+    removeOnComplete: { count: 0 },
+    removeOnFail: { count: 50 },
   },
   'device-keepalive': {
     attempts: 2,
@@ -27,8 +27,8 @@ export const jobOptions = {
       type: 'exponential',
       delay: 3000,
     },
-    removeOnComplete: 50,
-    removeOnFail: 200,
+    removeOnComplete: { count: 0 },
+    removeOnFail: { count: 20 },
   },
   'quality-suspend': {
     attempts: 2,
@@ -36,8 +36,8 @@ export const jobOptions = {
       type: 'fixed',
       delay: 10000,
     },
-    removeOnComplete: 20,
-    removeOnFail: 100,
+    removeOnComplete: { count: 0 },
+    removeOnFail: { count: 20 },
   },
   'maintenance-cleanup': {
     attempts: 1,
@@ -45,8 +45,8 @@ export const jobOptions = {
       type: 'fixed',
       delay: 5000,
     },
-    removeOnComplete: 10,
-    removeOnFail: 50,
+    removeOnComplete: { count: 0 },
+    removeOnFail: { count: 10 },
   },
   'device-wakeup': {
     attempts: 3,
@@ -54,8 +54,8 @@ export const jobOptions = {
       type: 'exponential',
       delay: 5000,
     },
-    removeOnComplete: 50,
-    removeOnFail: 200,
+    removeOnComplete: { count: 0 },
+    removeOnFail: { count: 20 },
   },
 };
 
