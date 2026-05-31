@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 import Numbers from '../../models/Numbers.js';
 import Country from '../../models/Countires.js';
 import Device from '../../models/Device.js';
-import Message from '../../models/Message.js';
 import CronStatus from '../../models/Cron.js';
 import { sendWakeUpNotification } from '../../lib/fcm/send.js';
 import { initializeFirebase } from '../../lib/fcm/index.js';
@@ -19,69 +18,6 @@ async function getIndiaId() {
     : new mongoose.Types.ObjectId(country._id.toString());
 }
 
-async function cleanupStaleDevices() {
-  const AUTO_DELETE_ENABLED = process.env.DEVICE_AUTO_DELETE_ENABLED !== 'false';
-  const AUTO_DELETE_HOURS = parseInt(process.env.DEVICE_AUTO_DELETE_HOURS || '24');
-
-  if (!AUTO_DELETE_ENABLED) {
-    return { deleted: 0, errors: 0 };
-  }
-
-  const cutoffTime = new Date(Date.now() - AUTO_DELETE_HOURS * 60 * 60 * 1000);
-
-  try {
-    const staleDevices = await Device.find({
-      lastHeartbeat: { $lt: cutoffTime },
-      isActive: true
-    });
-
-    if (staleDevices.length === 0) {
-      return { deleted: 0, errors: 0 };
-    }
-
-    // console.log(`\n${'─'.repeat(55)}`);
-    // console.log(`🧹 CLEANUP: Found ${staleDevices.length} device(s) offline for ${AUTO_DELETE_HOURS}+ hours`);
-    // console.log(`${'─'.repeat(55)}`);
-
-    let deletedCount = 0;
-    let errorCount = 0;
-
-    for (const device of staleDevices) {
-      try {
-        // Delete associated messages
-        const messagesDeleted = await Message.deleteMany({ 'metadata.deviceId': device.deviceId });
-
-        // Deactivate all numbers from this device
-        const numbersDeactivated = await Numbers.updateMany(
-          { port: { $regex: `^${device.deviceId}-SIM` } },
-          { $set: { active: false, signal: 0 } }
-        );
-
-        // Delete the device
-        await Device.deleteOne({ _id: device._id });
-
-        deletedCount++;
-        // console.log(`🗑️ DELETED  ${device.deviceId} (${device.name || 'unnamed'})`);
-        // console.log(`   Messages deleted: ${messagesDeleted.deletedCount}, Numbers deactivated: ${numbersDeactivated.modifiedCount}`);
-      } catch (err) {
-        errorCount++;
-        console.error(`[Status] Failed to delete device ${device.deviceId}: ${err.message}`);
-      }
-    }
-
-    if (deletedCount > 0) {
-      console.log(`[Status] Cleanup: Deleted ${deletedCount} stale device(s)${errorCount > 0 ? `, ${errorCount} error(s)` : ''}`);
-    }
-    // console.log(`${'─'.repeat(55)}`);
-    // console.log(`✅ CLEANUP DONE: Deleted ${deletedCount} device(s)${errorCount > 0 ? `, ${errorCount} error(s)` : ''}`);
-    // console.log(`${'─'.repeat(55)}`);
-
-    return { deleted: deletedCount, errors: errorCount };
-  } catch (err) {
-    console.error(`[Status] Cleanup error: ${err.message}`);
-    return { deleted: 0, errors: 1 };
-  }
-}
 
 export async function handleStatusJob(data) {
   const startTime = Date.now();
@@ -315,9 +251,6 @@ export async function handleStatusJob(data) {
       console.error('[Sync] Failed to update CronStatus:', cronErr.message);
     }
 
-    // Run cleanup of stale devices after sync
-    const cleanupResult = await cleanupStaleDevices();
-
     return {
       success: true,
       processed: activeDevices.length,
@@ -336,7 +269,6 @@ export async function handleStatusJob(data) {
         numbersAfter: totalNumbersAfter,
         activeNumbersBefore,
         activeNumbersAfter,
-        devicesDeleted: cleanupResult.deleted,
       },
     };
   } catch (error) {
