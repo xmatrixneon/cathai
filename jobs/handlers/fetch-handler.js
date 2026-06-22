@@ -565,10 +565,30 @@ export async function handleFetchJob(data) {
       }
     }
 
-    // === BATCH LOCK CREATIONS ===
+    // === BATCH LOCK CREATIONS (with upsert to prevent duplicates) ===
     if (locksToCreate.length > 0) {
-      await Lock.insertMany(locksToCreate, { ordered: false });
-      // console.log(`[Fetch] Batch created ${locksToCreate.length} locks`);
+      // Use bulkWrite with upsert instead of insertMany to prevent duplicate locks
+      const lockBulkOps = locksToCreate.map(lock => ({
+        updateOne: {
+          filter: {
+            number: lock.number,
+            countryid: lock.countryid,
+            serviceid: lock.serviceid
+          },
+          update: {
+            $set: {
+              locked: true,
+              updatedAt: new Date()
+            },
+            $setOnInsert: {
+              createdAt: new Date()
+            }
+          },
+          upsert: true
+        }
+      }));
+      await Lock.bulkWrite(lockBulkOps, { ordered: false });
+      // console.log(`[Fetch] Batch upserted ${lockBulkOps.length} locks`);
     }
 
     console.log(`[Fetch] Job completed - processed: ${processed}, otpsFound: ${otpsFound}`);

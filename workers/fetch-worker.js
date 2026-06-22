@@ -66,6 +66,16 @@ const worker = new Worker('sms-fetch', async (job) => {
 }, {
   connection: getRedis(),
   concurrency: getWorkerConcurrency('sms-fetch', 1),
+  // Auto-remove old jobs to prevent Redis memory issues
+  removeOnComplete: {
+    age: 3600, // Keep completed jobs for 1 hour
+    count: 100, // Keep max 100 completed jobs
+    limit: 50, // Remove max 50 jobs per cleanup
+  },
+  removeOnFail: {
+    age: 7200, // Keep failed jobs for 2 hours
+    count: 50, // Keep max 50 failed jobs
+  },
 });
 
 worker.on('completed', (job) => {

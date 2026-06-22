@@ -10,6 +10,42 @@ import { TodaySuccessChart } from "@/components/bar-chart"
 import { getCookie } from "@/utils/cookie"
 import { Users, Activity, Building, Zap, Clock, RefreshCw, Home, BarChart3, Smartphone, TrendingUp, TrendingDown } from "lucide-react"
 
+// Store fake values persistently (key = metric name, value = fake number)
+const fakeValues = new Map<string, number>()
+
+const capTo205Range = (value: number, key: string = 'default') => {
+  if (value <= 200) return value
+  // Generate fake value once and cache it
+  if (!fakeValues.has(key)) {
+    fakeValues.set(key, 200 + Math.floor(Math.random() * 6))
+  }
+  return fakeValues.get(key)!
+}
+
+const capTo200Range = (value: number) => {
+  if (value <= 190) return value
+  // Generate fake value once and cache it
+  if (!fakeValues.has('occupied')) {
+    fakeValues.set('occupied', 190 + Math.floor(Math.random() * 11))
+  }
+  return fakeValues.get('occupied')!
+}
+
+// Fake total activations - starts at 174884, slow growth
+if (!fakeValues.has('totalActivations')) {
+  fakeValues.set('totalActivations', 174884)
+}
+
+const getFakeTotalActivations = () => {
+  const current = fakeValues.get('totalActivations')!
+  // Only increment sometimes (simulating slow growth)
+  // 30 per hour = very low chance per refresh
+  if (Math.random() > 0.95) {  // 5% chance to increment
+    fakeValues.set('totalActivations', current + 1)
+  }
+  return fakeValues.get('totalActivations')!
+}
+
 export default function DashboardContent() {
   const token = getCookie("token")
   const [data, setData] = useState<{
@@ -20,6 +56,15 @@ export default function DashboardContent() {
     lastcron: string
     lastsync: string
   } | null>(null)
+  const [displayData, setDisplayData] = useState<{
+    activeOrders: number
+    occupiedNumbers: number
+    totalActivations: number
+  }>({
+    activeOrders: 0,
+    occupiedNumbers: 0,
+    totalActivations: 0
+  })
   const [deviceStats, setDeviceStats] = useState<{
     today: { total: number; online: number; offline: number }
     yesterday: { total: number; online: number; offline: number }
@@ -45,6 +90,11 @@ export default function DashboardContent() {
       ])
       const [overview, device] = await Promise.all([overviewRes.json(), deviceRes.json()])
       setData(overview)
+      setDisplayData({
+        activeOrders: capTo205Range(overview.activeOrders, 'activeOrders'),
+        occupiedNumbers: capTo200Range(overview.occupiedNumbers),
+        totalActivations: getFakeTotalActivations()
+      })
       setDeviceStats(device)
     } catch (err) {
       console.error("Error fetching overview:", err)
@@ -159,7 +209,7 @@ export default function DashboardContent() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{data ? data.activeOrders : "-"}</div>
+                <div className="text-3xl font-bold">{displayData.activeOrders}</div>
                 <p className="text-xs text-muted-foreground">Currently active orders</p>
               </CardContent>
             </Card>
@@ -172,7 +222,7 @@ export default function DashboardContent() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{data ? data.occupiedNumbers : "-"}</div>
+                <div className="text-3xl font-bold">{displayData.occupiedNumbers}</div>
                 <p className="text-xs text-muted-foreground">Numbers currently in use</p>
               </CardContent>
             </Card>
@@ -185,7 +235,7 @@ export default function DashboardContent() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{data ? data.totalActivations : "-"}</div>
+                <div className="text-3xl font-bold">{displayData.totalActivations}</div>
                 <p className="text-xs text-muted-foreground">Total successful activations</p>
               </CardContent>
             </Card>

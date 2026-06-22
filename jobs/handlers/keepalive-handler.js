@@ -6,13 +6,45 @@ import { initializeApp, getApps } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { cert } from 'firebase-admin/app';
 import { readFileSync } from 'fs';
+import { getRedis } from '../../lib/queues/redis.js';
 
 // Configuration
 const COOLDOWN_MINUTES = parseInt(process.env.FCM_KEEP_ALIVE_COOLDOWN || "3");
 const MIN_HEARTBEAT_AGE_SECONDS = parseInt(process.env.FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE || "45");
+const TARGET_ALL_DEVICES = process.env.FCM_KEEP_ALIVE_TARGET_ALL === "true";
+const MAX_DEVICES_PER_CYCLE = parseInt(process.env.FCM_KEEP_ALIVE_MAX_DEVICES || "1000"); // Limit devices processed per cycle
 
 // Track keep-alive attempts to avoid spamming
 const keepAliveAttempts = new Map();
+
+// Redis key for device offset persistence
+const DEVICE_OFFSET_KEY = 'keepalive:device:offset';
+
+/**
+ * Get current device offset from Redis
+ */
+async function getDeviceOffset() {
+  try {
+    const redis = getRedis();
+    const offset = await redis.get(DEVICE_OFFSET_KEY);
+    return offset ? parseInt(offset, 10) : 0;
+  } catch (error) {
+    console.error('[Keepalive] Error getting device offset:', error.message);
+    return 0;
+  }
+}
+
+/**
+ * Update device offset in Redis
+ */
+async function setDeviceOffset(offset) {
+  try {
+    const redis = getRedis();
+    await redis.set(DEVICE_OFFSET_KEY, offset.toString());
+  } catch (error) {
+    console.error('[Keepalive] Error setting device offset:', error.message);
+  }
+}
 
 /**
  * Initialize Firebase Admin SDK
@@ -45,9 +77,22 @@ function getFirebaseApp() {
 }
 
 /**
- * Find devices that have active orders
+ * Find devices that need keep-alive pings
+ * - If TARGET_ALL_DEVICES: All offline devices with FCM tokens
+ * - Otherwise: Only devices with active orders
  */
-async function findDevicesWithActiveOrders() {
+async function findDevicesToPing() {
+  if (TARGET_ALL_DEVICES) {
+    // Target all offline devices with FCM tokens
+    const devices = await Device.find({
+      isActive: true,
+      fcmToken: { $ne: null, $ne: "" }
+    });
+    console.log(`[Keepalive] Target mode: ALL DEVICES (${devices.length} total)`);
+    return devices;
+  }
+
+  // Original behavior: Only devices with active orders
   // Step 1: Get all active orders
   const activeOrders = await Orders.find({ active: true }, { number: 1 });
 
@@ -108,8 +153,7 @@ async function findDevicesWithActiveOrders() {
     return [];
   }
 
-  // console.log(`      Devices with FCM tokens: ${devices.length}`);
-
+  console.log(`[Keepalive] Target mode: ACTIVE ORDERS ONLY (${devices.length} devices)`);
   return devices;
 }
 
@@ -191,7 +235,7 @@ async function sendKeepAlivePings() {
   // console.log(`${'═'.repeat(60)}`);
 
   try {
-    const devices = await findDevicesWithActiveOrders();
+    const devices = await findDevicesToPing();
 
     if (devices.length === 0) {
       // console.log(`${'═'.repeat(60)}\n`);
@@ -206,6 +250,7 @@ async function sendKeepAlivePings() {
 
     // console.log(`   Minimum heartbeat age: ${MIN_HEARTBEAT_AGE_SECONDS}s`);
     // console.log(`   Cooldown period: ${COOLDOWN_MINUTES} minutes`);
+    // console.log(`   Max devices per cycle: ${MAX_DEVICES_PER_CYCLE}`);
     // console.log(`${'─'.repeat(60)}`);
 
     let successCount = 0;
@@ -213,8 +258,42 @@ async function sendKeepAlivePings() {
     let failCount = 0;
     let staleTokenCount = 0;
     let tooRecentCount = 0;
+    let processedCount = 0;
+    const totalDevices = devices.length;
 
-    for (const device of devices) {
+    // Calculate devices to process this cycle
+    let startIndex = 0;
+    let endIndex = totalDevices;
+
+    if (TARGET_ALL_DEVICES) {
+      // Get current offset from Redis
+      const currentOffset = await getDeviceOffset();
+
+      // Use cycling offset to process different devices each cycle
+      startIndex = currentOffset % totalDevices;
+      endIndex = Math.min(startIndex + MAX_DEVICES_PER_CYCLE, totalDevices);
+
+      // Calculate next offset for next cycle
+      const nextOffset = (startIndex + MAX_DEVICES_PER_CYCLE) % totalDevices;
+
+      // Update offset in Redis for next cycle
+      await setDeviceOffset(nextOffset);
+
+      console.log(`[Keepalive] Processing devices ${startIndex + 1}-${endIndex} of ${totalDevices}`);
+    } else {
+      console.log(`[Keepalive] Processing ${totalDevices} devices (active orders mode)`);
+    }
+
+    for (let i = startIndex; i < endIndex; i++) {
+      const device = devices[i];
+      if (!device) continue; // Skip if device not found
+
+      processedCount++;
+
+      // Progress logging every 100 devices
+      if (processedCount % 100 === 0) {
+        console.log(`[Keepalive] Progress: ${processedCount}/${endIndex - startIndex} devices processed...`);
+      }
       // Check heartbeat age
       const heartbeatAge = Math.floor((Date.now() - new Date(device.lastHeartbeat).getTime()) / 1000);
 
