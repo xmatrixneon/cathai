@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +15,8 @@ import {
   PhoneOff,
   Send,
   Power,
+  Copy,
+  Check,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -23,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Device } from '@/types/device'
+import { toast } from 'sonner'
 
 interface DeviceCardProps {
   device: Device
@@ -85,6 +88,19 @@ export function DeviceCard({ device, onCallForwarding, onSendSms, onWakeUp, isWa
   const isOnline = device.status === 'online'
   // Show wake-up button if device has FCM token (for both online and offline for testing)
   const canWakeUp = device.fcmToken && onWakeUp
+
+  const [copiedSimSlot, setCopiedSimSlot] = useState<number | null>(null)
+
+  const handleCopyNumber = async (phoneNumber: string, simSlot: number) => {
+    try {
+      await navigator.clipboard.writeText(phoneNumber)
+      setCopiedSimSlot(simSlot)
+      toast.success(`Copied: ${phoneNumber}`)
+      setTimeout(() => setCopiedSimSlot(null), 2000)
+    } catch {
+      toast.error('Failed to copy number')
+    }
+  }
 
   return (
     <Card className="hover:shadow-md transition-shadow">
@@ -185,7 +201,27 @@ export function DeviceCard({ device, onCallForwarding, onSendSms, onWakeUp, isWa
               >
                 <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                   <Badge variant={sim.isActive ? 'default' : 'outline'} className="text-xs h-5 px-1.5">
-                    SIM {sim.slot}{sim.phoneNumber && `: ${sim.phoneNumber}`}
+                    SIM {sim.slot}{sim.phoneNumber && (
+                      <>
+                        {`: ${sim.phoneNumber}`}
+                        {sim.isActive && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleCopyNumber(sim.phoneNumber!, sim.slot)
+                            }}
+                            className="ml-1.5 opacity-60 hover:opacity-100 transition-opacity"
+                            title="Copy number"
+                          >
+                            {copiedSimSlot === sim.slot ? (
+                              <Check className="h-3 w-3 text-green-600" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                          </button>
+                        )}
+                      </>
+                    )}
                   </Badge>
                   {sim.callForwardingActive && (
                     <Badge
