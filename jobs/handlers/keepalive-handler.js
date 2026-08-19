@@ -7,15 +7,31 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { cert } from 'firebase-admin/app';
 import { readFileSync } from 'fs';
 import { getRedis } from '../../lib/queues/redis.js';
+import { isStaleFcmTokenError } from '../../lib/fcm/send.js';
 
 // Configuration
 const COOLDOWN_MINUTES = parseInt(process.env.FCM_KEEP_ALIVE_COOLDOWN || "3");
 const MIN_HEARTBEAT_AGE_SECONDS = parseInt(process.env.FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE || "45");
 const TARGET_ALL_DEVICES = process.env.FCM_KEEP_ALIVE_TARGET_ALL === "true";
 const MAX_DEVICES_PER_CYCLE = parseInt(process.env.FCM_KEEP_ALIVE_MAX_DEVICES || "1000"); // Limit devices processed per cycle
+// Only ping devices whose last heartbeat is within this window (hours).
+// Devices offline longer than this almost never come back from a keep-alive
+// ping (app uninstalled / factory reset), and with ~34k total devices they
+// dilute the cycle so much that recoverable devices only get pinged every
+// 20-30 minutes. Set to 0 to ping ALL offline devices (previous behavior).
+const MAX_OFFLINE_HOURS = parseInt(process.env.FCM_KEEP_ALIVE_MAX_OFFLINE_HOURS || "48");
+
+// Only the fields used by the ping loop — full Device docs (with sims arrays,
+// call forwarding state, etc.) for 20k+ devices caused the worker to OOM at
+// its 900MB limit and crash-loop (170 restarts).
+const DEVICE_FIELDS = 'deviceId name status fcmToken lastHeartbeat';
 
 // Track keep-alive attempts to avoid spamming
 const keepAliveAttempts = new Map();
+
+// Diagnostics: log each distinct FCM error code once (per process lifetime)
+// so failures can be classified without flooding the logs.
+const seenFcmErrorCodes = new Set();
 
 // Redis key for device offset persistence
 const DEVICE_OFFSET_KEY = 'keepalive:device:offset';
@@ -83,12 +99,24 @@ function getFirebaseApp() {
  */
 async function findDevicesToPing() {
   if (TARGET_ALL_DEVICES) {
-    // Target all offline devices with FCM tokens
-    const devices = await Device.find({
+    // Target offline devices with FCM tokens, bounded to a recency window.
+    // Devices silent longer than MAX_OFFLINE_HOURS are skipped: they are
+    // overwhelmingly dead (uninstalled apps / stale tokens) and only dilute
+    // the ping cycle. Reactive wake-up of long-offline devices remains the
+    // wakeup worker's job.
+    const query = {
       isActive: true,
-      fcmToken: { $ne: null, $ne: "" }
-    });
-    console.log(`[Keepalive] Target mode: ALL DEVICES (${devices.length} total)`);
+      // NOTE: { $ne: null, $ne: "" } is a duplicate-key object literal — JS keeps
+      // only the last $ne, so null tokens matched and every ping to them failed
+      // with messaging/invalid-payload ("Exactly one of topic, token or
+      // condition is required"). $nin is the correct form.
+      fcmToken: { $exists: true, $nin: [null, ""] }
+    };
+    if (MAX_OFFLINE_HOURS > 0) {
+      query.lastHeartbeat = { $gte: new Date(Date.now() - MAX_OFFLINE_HOURS * 60 * 60 * 1000) };
+    }
+    const devices = await Device.find(query).select(DEVICE_FIELDS).lean();
+    console.log(`[Keepalive] Target mode: ALL DEVICES${MAX_OFFLINE_HOURS > 0 ? ` (seen <${MAX_OFFLINE_HOURS}h)` : ''} (${devices.length} total)`);
     return devices;
   }
 
@@ -145,8 +173,8 @@ async function findDevicesToPing() {
   const devices = await Device.find({
     deviceId: { $in: deviceIdArray },
     isActive: true,
-    fcmToken: { $ne: null, $ne: "" }
-  });
+    fcmToken: { $exists: true, $nin: [null, ""] }
+  }).select(DEVICE_FIELDS).lean();
 
   if (devices.length === 0) {
     // console.log(`   ⚠️  No devices with valid FCM tokens found`);
@@ -215,11 +243,16 @@ async function sendKeepAlivePing(device) {
     return { success: true, isStaleToken: false };
 
   } catch (error) {
-    // Check if token is unregistered
-    if (error.code === 'messaging/registration-token-not-registered') {
+    // Shared detection covers legacy + modern firebase-admin codes
+    // (messaging/unregistered, invalid-registration-token, sender-id-mismatch, ...)
+    if (isStaleFcmTokenError(error)) {
       return { success: false, isStaleToken: true };
     }
-    // console.log(`      Error: ${error.message}`);
+    const code = error?.code || error?.errorInfo?.code || 'unknown';
+    if (!seenFcmErrorCodes.has(code)) {
+      seenFcmErrorCodes.add(code);
+      console.warn(`[Keepalive] FCM send error code=${code} msg=${(error?.message || '').slice(0, 200)}`);
+    }
     return { success: false, isStaleToken: false };
   }
 }

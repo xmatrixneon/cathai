@@ -70,14 +70,16 @@ node script/create-mobile-user.mjs <email> <password> <name>
 
 ## PM2 Apps
 
-The system runs 6 PM2 processes (configured in `ecosystem.config.cjs`):
+The system runs these PM2 processes (configured in `ecosystem.config.cjs`):
 
 1. **manager** - Main Next.js app (`npm start`)
 2. **worker:status** - Device/number status sync worker (`workers/status-worker.js`)
 3. **worker:fetch** - SMS fetch worker (`workers/fetch-worker.js`)
-4. **worker:suspend** - SMS quality monitor worker (`workers/suspend-worker.js`)
-5. **worker:cleanup** - Message cleanup worker (`workers/cleanup-worker.js`)
-6. **worker:keepalive** - FCM keep-alive worker (`workers/keepalive-worker.js`)
+4. **worker:cleanup** - Message cleanup worker (`workers/cleanup-worker.js`)
+5. **worker:keepalive** - FCM keep-alive worker (`workers/keepalive-worker.js`)
+6. **worker:wakeup** - FCM reactive wake-up worker (`workers/wakeup-worker.js`)
+
+**DISABLED: worker:suspend** - SMS quality monitor worker. Disabled by user decision (2026-08-19); commented out in `ecosystem.config.cjs` and `SMS_AUTO_SUSPEND_ENABLED=false` / `BULLMQ_SUSPEND_ENABLED=false` in `.env`. The worker also self-exits if started while `SMS_AUTO_SUSPEND_ENABLED=false`. Do not start it unless the user asks.
 
 ### BullMQ Architecture
 
@@ -161,9 +163,11 @@ Runs via BullMQ scheduling every 15 seconds:
 
 ### SMS Quality Monitor (BullMQ Worker: `workers/suspend-worker.js`)
 
+**STATUS: DISABLED** (2026-08-19, user decision — number suspend system turned off). Not running in PM2; commented out in `ecosystem.config.cjs`. The documentation below describes its behavior if ever re-enabled.
+
 **Replaces**: `script/suspend-low-sms.mjs` (deprecated)
 
-Runs as PM2 process `worker:suspend`:
+Would run as PM2 process `worker:suspend`:
 
 **Suspend check** (every 15 minutes):
 - Counts SMS received per number in last N hours (configurable)
@@ -241,8 +245,11 @@ Runs as PM2 process `worker:keepalive` to proactively keep devices online:
 - `FCM_KEEP_ALIVE_CRON` - Scan interval (default: `*/30 * * * * *` = every 30 sec)
 - `FCM_KEEP_ALIVE_COOLDOWN` - Minutes between keep-alive attempts (default: 3)
 - `FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE` - Min heartbeat age in seconds (default: 45)
+- `FCM_KEEP_ALIVE_MAX_OFFLINE_HOURS` - Only ping devices whose last heartbeat is within this window in hours (default: 48; 0 = all offline devices). Bounds the ping cycle to recoverable devices instead of the whole fleet.
 
 **Handler**: `jobs/handlers/keepalive-handler.js` exports `handleKeepaliveJob(data)`
+
+**Stale FCM token cleanup**: `isStaleFcmTokenError()` in `lib/fcm/send.js` is the single source of truth for classifying permanently-dead tokens (legacy and modern firebase-admin error codes: `messaging/unregistered`, `messaging/registration-token-not-registered`, `messaging/invalid-registration-token`, `messaging/sender-id-mismatch`, etc.). Detected stale tokens are unset from the Device document; the Android app re-registers its token on next register/heartbeat.
 
 ### SMS Fetch Worker (BullMQ Worker: `workers/fetch-worker.js`)
 
@@ -376,7 +383,7 @@ Optional:
 **BullMQ Worker Enable/Disable:**
 - `BULLMQ_STATUS_ENABLED` - Enable status worker (default: false)
 - `BULLMQ_FETCH_ENABLED` - Enable fetch worker (default: false)
-- `BULLMQ_SUSPEND_ENABLED` - Enable suspend worker (default: false)
+- `BULLMQ_SUSPEND_ENABLED` - Enable suspend worker (default: false; currently **false — worker:suspend disabled**)
 - `BULLMQ_CLEANUP_ENABLED` - Enable cleanup worker (default: false)
 - `BULLMQ_KEEPALIVE_ENABLED` - Enable keepalive worker (default: false)
 
@@ -388,7 +395,7 @@ Optional:
 - `FCM_WAKE_UP_COOLDOWN` - Cooldown minutes between attempts (default: 5)
 
 **SMS Auto-Suspend (script/suspend-low-sms.mjs):**
-- `SMS_AUTO_SUSPEND_ENABLED` - Enable SMS-based auto-suspend (default: true)
+- `SMS_AUTO_SUSPEND_ENABLED` - Enable SMS-based auto-suspend (default: true; currently **false — disabled**)  
 - `SMS_SUSPEND_THRESHOLD` - Minimum SMS count to avoid suspension (default: 0)
 - `SMS_SUSPEND_WINDOW_HOURS` - Time window for SMS counting (default: 24)
 - `SMS_SUSPEND_DRY_RUN` - Log actions without executing (default: false)

@@ -86,6 +86,7 @@ module.exports = {
         FCM_KEEP_ALIVE_COOLDOWN: '3', // 3 minutes between pings
         FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE: '45', // Only ping if heartbeat > 45 seconds old
         FCM_KEEP_ALIVE_MAX_DEVICES: '1000', // Max devices to process per cycle (to prevent long-running jobs)
+        FCM_KEEP_ALIVE_MAX_OFFLINE_HOURS: '48', // Only ping devices seen < 48h; 0 = all (old behavior)
       },
       // Optimized memory for 62GB RAM system
       node_args: '--max-old-space-size=1024', // 1GB heap, PM2 restarts at 900MB
@@ -108,20 +109,22 @@ module.exports = {
     },
 
     // Quality Suspend Worker - SMS quality monitoring (every 15 min)
-    {
-      name: 'worker:suspend',
-      script: 'workers/suspend-worker.js',
-      instances: 1,
-      env: {
-        BULLMQ_SUSPEND_ENABLED: 'true',
-        BULLMQ_CONCURRENCY_QUALITY_SUSPEND: String(lowConcurrencyWorkers), // 6 concurrent (was 4)
-        SMS_AUTO_SUSPEND_ENABLED: 'true',
-        SMS_SUSPEND_THRESHOLD: '0',
-        SMS_SUSPEND_WINDOW_HOURS: '12',
-      },
-      // Increased memory for 62GB RAM
-      node_args: '--max-old-space-size=512',
-    },
+    // DISABLED by user decision (2026-08-19): number suspend system turned off.
+    // Do NOT start via `pm2 start ecosystem.config.cjs` — uncomment to re-enable.
+    // {
+    //   name: 'worker:suspend',
+    //   script: 'workers/suspend-worker.js',
+    //   instances: 1,
+    //   env: {
+    //     BULLMQ_SUSPEND_ENABLED: 'true',
+    //     BULLMQ_CONCURRENCY_QUALITY_SUSPEND: String(lowConcurrencyWorkers), // 6 concurrent (was 4)
+    //     SMS_AUTO_SUSPEND_ENABLED: 'true',
+    //     SMS_SUSPEND_THRESHOLD: '0',
+    //     SMS_SUSPEND_WINDOW_HOURS: '12',
+    //   },
+    //   // Increased memory for 62GB RAM
+    //   node_args: '--max-old-space-size=512',
+    // },
 
     // Message Cleanup Worker - Maintenance task (every 6 hours)
     {
