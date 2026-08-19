@@ -8,7 +8,6 @@ const cpuCount = os.cpus().length; // 12 cores
 const totalMemGB = os.totalmem() / (1024 ** 3); // ~62GB
 
 // MAXIMIZED Scaling calculations for 12-core / 62GB system
-const managerInstances = cpuCount; // 12 instances (was 6) - fully utilize all cores
 const highConcurrencyWorkers = cpuCount * 2; // 24 concurrent jobs (was 12)
 const mediumConcurrencyWorkers = cpuCount; // 12 concurrent (was 6)
 const lowConcurrencyWorkers = Math.floor(cpuCount / 2); // 6 concurrent (was 4)
@@ -16,27 +15,29 @@ const lowConcurrencyWorkers = Math.floor(cpuCount / 2); // 6 concurrent (was 4)
 module.exports = {
   apps: [
     // ==========================================
-    // Main Application - Cluster Mode
+    // Main Application - Single Fork Instance
     // ==========================================
+    // IMPORTANT: must stay exec_mode 'fork' with instances 1.
+    // PM2 cannot cluster the npm wrapper (it silently forks N competing
+    // processes where only one binds port 3000 — previously left 5 zombie
+    // instances). True cluster mode is NOT safe either: WebSocketManager
+    // keeps sockets in per-process memory (no Redis pub/sub adapter), so
+    // multiple workers would break sendToDevice()/dashboards. One Node
+    // process comfortably handles 10k+ WebSocket connections on this box.
+    // wait_ready removed: server.js never calls process.send('ready'),
+    // so wait_ready:true caused PM2 restart loops (historical ↺30 count).
     {
       name: 'manager',
-      script: 'npm',
-      args: 'start',
-      instances: managerInstances,
-      exec_mode: 'cluster',
+      script: 'server.js',
+      exec_mode: 'fork',
+      instances: 1,
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
       },
-      // Auto-restart configuration
       autorestart: true,
       watch: false,
-      // No memory limit restart - VPS has 62GB RAM, processes use ~1.3GB total
-      // Graceful shutdown
       kill_timeout: 5000,
-      wait_ready: true,
-      listen_timeout: 10000,
-      // Cluster optimizations - increased for 62GB RAM
       node_args: '--max-old-space-size=4096',
     },
 
