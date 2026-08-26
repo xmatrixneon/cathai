@@ -17,6 +17,12 @@ const __dirname = dirname(__filename);
 // Delay to use when scheduling next job after a failure (to prevent rapid retry loops)
 const ERROR_RETRY_DELAY = parseInt(process.env.BULLMQ_ERROR_RETRY_DELAY || '30000', 10);
 
+// Hard cap on job execution. A hung await inside the handler (e.g. a network
+// socket that never resolves) keeps renewing the BullMQ lock, so the job is
+// never detected as stalled — and since jobs self-schedule only on completion,
+// one hang kills the whole sync chain permanently.
+const JOB_TIMEOUT_MS = parseInt(process.env.BULLMQ_JOB_TIMEOUT_MS || '120000', 10);
+
 // Global error handlers to prevent worker crashes
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[Status] Unhandled Rejection at:', promise, 'reason:', reason);
@@ -44,7 +50,36 @@ await connectDB();
 
 const worker = new Worker('device-status', async (job) => {
   return withJobLogging(job, async () => {
-    const result = await handleStatusJob(job.data);
+    let timer;
+    let result;
+    try {
+      result = await Promise.race([
+        handleStatusJob(job.data),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Job timed out after ${JOB_TIMEOUT_MS}ms`)),
+            JOB_TIMEOUT_MS
+          );
+        }),
+      ]);
+    } catch (err) {
+      // Keep the self-scheduling chain alive even if the job timed out or threw
+      if (job.data.type === 'scheduled') {
+        console.error(`[Status] Job ${job.id} failed (${err.message}) - rescheduling in ${ERROR_RETRY_DELAY}ms`);
+        await statusQueue.add(
+          'device-status',
+          {
+            type: 'scheduled',
+            runId: crypto.randomUUID(),
+            startedAt: Date.now(),
+          },
+          { delay: ERROR_RETRY_DELAY }
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
 
     // Schedule next run for scheduled jobs (regardless of success/failure)
     if (job.data.type === 'scheduled') {

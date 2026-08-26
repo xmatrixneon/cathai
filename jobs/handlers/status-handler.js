@@ -4,8 +4,6 @@ import Numbers from '../../models/Numbers.js';
 import Country from '../../models/Countires.js';
 import Device from '../../models/Device.js';
 import CronStatus from '../../models/Cron.js';
-import { sendWakeUpNotification } from '../../lib/fcm/send.js';
-import { initializeFirebase } from '../../lib/fcm/index.js';
 
 async function getIndiaId() {
   const country = await Country.findOne({ name: "India" });
@@ -67,29 +65,8 @@ export async function handleStatusJob(data) {
           statusChangedOffline++;
           // console.log(`🔴 OFFLINE  ${device.deviceId} (${device.name || 'unnamed'})`);
 
-          // Trigger immediate wake-up for devices that just went offline
-          if (device.fcmToken) {
-            initializeFirebase();
-            try {
-              const result = await sendWakeUpNotification(device.deviceId, device.fcmToken);
-              if (result.success) {
-                await Device.updateOne(
-                  { _id: device._id },
-                  { $set: { lastWakeupAttempt: new Date() } }
-                );
-                // console.log(`📡 WAKE-UP  Sent to ${device.deviceId}`);
-              } else if (result.isStaleToken) {
-                // Remove stale FCM token
-                await Device.updateOne(
-                  { deviceId: device.deviceId },
-                  { $unset: { fcmToken: '', fcmTokenUpdatedAt: '' } }
-                );
-                // console.log(`⚠️  Stale FCM token removed for ${device.deviceId}`);
-              }
-            } catch (err) {
-              // console.warn(`⚠️  Wake-up failed for ${device.deviceId}:`, err.message);
-            }
-          }
+          // Reactive FCM wake-up is owned by worker:wakeup (device-wakeup queue).
+          // Never await FCM here: a hung OAuth request stalls the entire sync.
         }
       }
 
