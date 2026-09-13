@@ -38,9 +38,9 @@ module.exports = {
       autorestart: true,
       watch: false,
       kill_timeout: 5000,
-      node_args: '--max-old-space-size=4096',
+      // 8GB heap headroom (RSS drifts to ~2GB+ over days of WebSocket state)
+      node_args: '--max-old-space-size=8192',
     },
-
     // ==========================================
     // BullMQ Workers - Optimized Concurrency
     // ==========================================
@@ -65,13 +65,13 @@ module.exports = {
       name: 'worker:status',
       script: 'workers/status-worker.js',
       instances: 2, // 2 instances for better load distribution
-      max_memory_restart: '3500M', // PM2 auto-restart if memory exceeds 3500MB (10% below heap limit)
+      max_memory_restart: '5500M', // PM2 auto-restart if memory exceeds 5500MB (10% below heap limit)
       env: {
         BULLMQ_STATUS_ENABLED: 'true',
         BULLMQ_CONCURRENCY_DEVICE_STATUS: String(highConcurrencyWorkers), // 24 concurrent (was 12)
       },
       // Optimized memory for 62GB RAM system
-      node_args: '--max-old-space-size=4096', // 4GB heap, PM2 restarts at 3.5GB
+      node_args: '--max-old-space-size=6144', // 6GB heap, PM2 restarts at 5.5GB
     },
 
     // Device Keep-Alive Worker - Prevents devices from going offline
@@ -79,18 +79,18 @@ module.exports = {
       name: 'worker:keepalive',
       script: 'workers/keepalive-worker.js',
       instances: 1,
-      max_memory_restart: '900M', // PM2 auto-restart if memory exceeds 900MB (10% below heap limit)
+      max_memory_restart: '1800M', // PM2 auto-restart if memory exceeds 1800MB (10% below heap limit)
       env: {
         BULLMQ_KEEPALIVE_ENABLED: 'true',
         BULLMQ_CONCURRENCY_DEVICE_KEEPALIVE: String(mediumConcurrencyWorkers), // 12 concurrent (was 6)
         FCM_KEEP_ALIVE_TARGET_ALL: 'true', // Target all devices instead of just active orders
         FCM_KEEP_ALIVE_COOLDOWN: '3', // 3 minutes between pings
         FCM_KEEP_ALIVE_MIN_HEARTBEAT_AGE: '45', // Only ping if heartbeat > 45 seconds old
-        FCM_KEEP_ALIVE_MAX_DEVICES: '1000', // Max devices to process per cycle (to prevent long-running jobs)
+        FCM_KEEP_ALIVE_MAX_DEVICES: '2000', // Max devices to process per cycle (covers 38k fleet ~2x faster)
         FCM_KEEP_ALIVE_MAX_OFFLINE_HOURS: '48', // Only ping devices seen < 48h; 0 = all (old behavior)
       },
       // Optimized memory for 62GB RAM system
-      node_args: '--max-old-space-size=1024', // 1GB heap, PM2 restarts at 900MB
+      node_args: '--max-old-space-size=2048', // 2GB heap, PM2 restarts at 1.8GB
     },
 
     // Device Wake-Up Worker - Reactively wakes offline devices
@@ -98,15 +98,23 @@ module.exports = {
       name: 'worker:wakeup',
       script: 'workers/wakeup-worker.js',
       instances: 1,
-      max_memory_restart: '450M', // PM2 auto-restart if memory exceeds 450MB (10% below heap limit)
+      max_memory_restart: '900M', // PM2 auto-restart if memory exceeds 900MB (10% below heap limit)
       env: {
         BULLMQ_WAKEUP_ENABLED: 'true',
-        BULLMQ_CONCURRENCY_DEVICE_WAKEUP: String(mediumConcurrencyWorkers), // 12 concurrent (was 6)
+        // Must be 1: single fleet-wide cycle chain; higher concurrency lets
+        // a replacement job overlap a timed-out handler still draining in
+        // the background and double-ping devices.
+        BULLMQ_CONCURRENCY_DEVICE_WAKEUP: '1',
         FCM_WAKE_UP_OFFLINE_THRESHOLD: '60',
-        FCM_WAKE_UP_COOLDOWN: '0',
+        // 0 = firehose (re-ping ALL ~22k offline devices every 2-min cycle, ~7k
+        // pings/min — burned Android's high-priority FCM budget and the job
+        // never finished). 30 = each offline device pinged at most every 30
+        // min; freshly-dropped devices still wake next cycle (their
+        // lastWakeupAttempt is stale).
+        FCM_WAKE_UP_COOLDOWN: '30',
       },
       // Optimized memory for 62GB RAM system
-      node_args: '--max-old-space-size=512', // 512MB heap, PM2 restarts at 450MB
+      node_args: '--max-old-space-size=1024', // 1GB heap, PM2 restarts at 900MB
     },
 
     // Quality Suspend Worker - SMS quality monitoring (every 15 min)

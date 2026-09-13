@@ -189,18 +189,24 @@ Would run as PM2 process `worker:suspend`:
 
 **Handler**: `jobs/handlers/suspend-handler.js` exports `handleSuspendJob(data)`
 
-### FCM Wake-Up Service
+### FCM Wake-Up Service (BullMQ Worker: `workers/wakeup-worker.js`)
 
-**Status**: Removed due to Firebase ES module compatibility issues (see commit `0803cb9`).
+Reactive wake-up of OFFLINE devices. Runs as PM2 process `worker:wakeup`.
 
-The wake-up service (`script/wakeup.mjs`) has been deprecated. Manual wake-up functionality may still be available via API endpoints if the Firebase integration is restored.
+**Behavior (per cycle, default every 2 minutes):**
+- Queries offline devices with FCM tokens: `isActive`, offline > threshold, within `FCM_WAKE_UP_MAX_OFFLINE_HOURS`, cooldown via `lastWakeupAttempt` (DB-persisted, survives restarts)
+- Newest-offline first (descending `lastHeartbeat`) — a device that JUST dropped (likely holding a pending OTP order) is pinged next cycle
+- Hard cap per cycle (`FCM_WAKE_UP_MAX_DEVICES`); cooldown rotates the rest through subsequent cycles
+- Uses `.select().lean()` (full docs for 17k+ devices OOM the worker); DB writes batched with `bulkWrite`
+- Job timeout (`BULLMQ_WAKEUP_JOB_TIMEOUT_MS`); worker ALWAYS reschedules (success or failure) so the chain cannot die; self-seeds on startup only if the chain is fully dead (delayed+waiting+active == 0); concurrency must stay 1
 
-**Previous API endpoints** (currently non-functional):
+**Manual wake-up API endpoints** (functional, send via `lib/fcm/send.js` directly, not via the queue):
 - `POST /api/device/:deviceId/wake-up` - Manually trigger wake-up for single device
 - `POST /api/device/wake-up-all` - Trigger wake-up for all offline devices
 
-**Device model fields** (preserved for future use):
+**Device model fields:**
 - `fcmToken` - Firebase Cloud Messaging token for wake-up notifications
+- `lastWakeupAttempt` - Cooldown stamp written after each successful ping
 
 ### Message Cleanup Service (BullMQ Worker: `workers/cleanup-worker.js`)
 
@@ -387,12 +393,13 @@ Optional:
 - `BULLMQ_CLEANUP_ENABLED` - Enable cleanup worker (default: false)
 - `BULLMQ_KEEPALIVE_ENABLED` - Enable keepalive worker (default: false)
 
-**FCM Wake-Up (script/wakeup.mjs):**
+**FCM Wake-Up (workers/wakeup-worker.js):**
 - `FCM_SERVICE_ACCOUNT_KEY` - Path to Firebase service account key JSON file (required for wake-up)
-- `FCM_WAKE_UP_CRON` - Scan interval cron format (default: `*/2 * * * * *` = every 2 min)
-- `FCM_WAKE_UP_OFFLINE_THRESHOLD` - Offline seconds before wake-up (default: 120)
-- `FCM_WAKE_UP_MAX_ATTEMPTS` - Max attempts per cycle (default: 3)
-- `FCM_WAKE_UP_COOLDOWN` - Cooldown minutes between attempts (default: 5)
+- `FCM_WAKE_UP_OFFLINE_THRESHOLD` - Offline seconds before wake-up candidacy (default: 60)
+- `FCM_WAKE_UP_COOLDOWN` - Minutes between wake attempts per device, DB-persisted via `lastWakeupAttempt` (default: 5; 0 = every cycle — firehose, do not use)
+- `FCM_WAKE_UP_MAX_OFFLINE_HOURS` - Skip devices offline longer than this (default: 48; 0 = no cap)
+- `FCM_WAKE_UP_MAX_DEVICES` - Per-cycle hard cap, newest-offline first (default: 2000; currently 500 via `.env`)
+- `BULLMQ_WAKEUP_JOB_TIMEOUT_MS` - Hard cap on job execution (default: 600000)
 
 **SMS Auto-Suspend (script/suspend-low-sms.mjs):**
 - `SMS_AUTO_SUSPEND_ENABLED` - Enable SMS-based auto-suspend (default: true; currently **false — disabled**)  
