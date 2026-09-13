@@ -17,6 +17,7 @@ import {
   Home,
   Smartphone,
   Activity,
+  ListChecks,
 } from "lucide-react"
 
 import Link from "next/link"
@@ -70,6 +71,7 @@ export default function CustomSidebar() {
       items: [
         { href: "/dashboard/countireslist", icon: Wallet, label: "Countires List" },
         { href: "/dashboard/serviceslist", icon: Receipt, label: "Services List" },
+        { href: "/dashboard/bulk-formats", icon: ListChecks, label: "Bulk Format Manager" },
         { href: "/dashboard/numberslist", icon: CreditCard, label: "Numbers List" },
         { href: "/dashboard/number-management", icon: Activity, label: "Number Management" },
         { href: "/dashboard/devices", icon: Smartphone, label: "Devices" },
