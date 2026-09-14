@@ -2,10 +2,17 @@ import connectDB from "@/lib/db"
 import Lock from "@/models/Lock"
 import Service from "@/models/Service"
 import { NextResponse } from "next/server"
+import { verify } from "@/lib/verify"
 
 export async function POST(req) {
   try {
     await connectDB()
+
+    // 🔐 Verify request
+    const auth = await verify(req)
+    if (!auth.success) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status || 401 })
+    }
 
     const { service } = await req.json()
     if (!service) {

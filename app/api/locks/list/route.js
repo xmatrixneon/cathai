@@ -9,21 +9,53 @@ export async function GET(req) {
   try {
     await connectDB()
 
-    // 🔐 Verify request
-    try {
-      await verify(req)
-    } catch (err) {
+    // 🔐 Verify request (verify() returns a result, it does not throw)
+    const auth = await verify(req)
+    if (!auth.success) {
       return NextResponse.json(
-        { error: err.error },
-        { status: err.status || 401 }
+        { error: auth.error },
+        { status: auth.status || 401 }
       )
     }
 
-    // Fetch locked=true and populate
-    const locks = await Lock.find({ locked: true })
-      .populate({ path: "countryid", model: Countires, select: "name" })
-      .populate({ path: "serviceid", model: Service, select: "name" })
-      .sort({ createdAt: -1 })
+    // 📄 Server-side pagination (locks collection has millions of docs -
+    // returning everything saturates MongoDB and hangs the site)
+    const { searchParams } = new URL(req.url)
+    const page = Math.max(1, parseInt(searchParams.get("page")) || 1)
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(searchParams.get("limit")) || 10)
+    )
+    const serviceName = searchParams.get("service")
+
+    // 🔍 Build filter
+    const filter = { locked: true }
+
+    if (serviceName && serviceName !== "All") {
+      const serviceDoc = await Service.findOne({ name: serviceName }).select(
+        "_id"
+      )
+      if (!serviceDoc) {
+        return NextResponse.json(
+          { success: true, locks: [], total: 0, page, totalPages: 0 },
+          { status: 200 }
+        )
+      }
+      filter.serviceid = serviceDoc._id
+    }
+
+    // Fetch page + total count in parallel (uses locked_created_compound index)
+    const [locks, total] = await Promise.all([
+      Lock.find(filter)
+        .select("number locked createdAt updatedAt countryid serviceid")
+        .populate({ path: "countryid", model: Countires, select: "name" })
+        .populate({ path: "serviceid", model: Service, select: "name" })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Lock.countDocuments(filter),
+    ])
 
     // 🔄 Transform response: include only plain countryName & serviceName
     const formatted = locks.map(lock => ({
@@ -36,7 +68,16 @@ export async function GET(req) {
       updatedAt: lock.updatedAt
     }))
 
-    return NextResponse.json({ success: true, locks: formatted }, { status: 200 })
+    return NextResponse.json(
+      {
+        success: true,
+        locks: formatted,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+      },
+      { status: 200 }
+    )
   } catch (error) {
     console.error("Error fetching locked numbers:", error)
     return NextResponse.json(

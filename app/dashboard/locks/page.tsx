@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select"
 import { Loader2, Unlock, Lock, Filter, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
+import { getCookie } from "@/utils/cookie"
 
 interface Lock {
   _id: string
@@ -38,31 +39,80 @@ export default function LocksList() {
   const [unlocking, setUnlocking] = useState<string | null>(null)
   const [unlockingAll, setUnlockingAll] = useState(false)
   const [selectedService, setSelectedService] = useState<string>("All")
+  const [serviceNames, setServiceNames] = useState<string[]>([])
   const [currentPage, setCurrentPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
   const itemsPerPage = 10
 
-  useEffect(() => {
-    async function fetchLocks() {
+  const fetchLocks = useCallback(
+    async (page = 1, service = "All") => {
       try {
         setLoading(true)
-        const res = await fetch(`/api/locks/list`)
+        const token = getCookie("token")
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: String(itemsPerPage),
+        })
+        if (service !== "All") params.set("service", service)
+        const res = await fetch(`/api/locks/list?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
         const data = await res.json()
         setLocks(data.locks || [])
+        setTotal(data.total || 0)
+        setTotalPages(data.totalPages || 1)
       } catch (err) {
         console.error("Error fetching locks:", err)
+        toast.error("Failed to load locks")
       } finally {
         setLoading(false)
       }
+    },
+    [itemsPerPage]
+  )
+
+  useEffect(() => {
+    fetchLocks(1)
+  }, [fetchLocks])
+
+  // Load service names for the filter dropdown
+  useEffect(() => {
+    async function fetchServices() {
+      try {
+        const token = getCookie("token")
+        const res = await fetch(`/api/services/all`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await res.json()
+        if (Array.isArray(data)) {
+          setServiceNames(
+            data.map((s: { name?: string }) => s.name).filter(Boolean)
+          )
+        }
+      } catch (err) {
+        console.error("Error fetching services:", err)
+      }
     }
-    fetchLocks()
+    fetchServices()
   }, [])
+
+  const handleServiceChange = (value: string) => {
+    setSelectedService(value)
+    setCurrentPage(1)
+    fetchLocks(1, value)
+  }
 
   const handleUnlock = async (id: string) => {
     try {
       setUnlocking(id)
+      const token = getCookie("token")
       const res = await fetch("/api/locks/unlock", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ id }),
       })
 
@@ -94,9 +144,13 @@ export default function LocksList() {
 
     try {
       setUnlockingAll(true)
+      const token = getCookie("token")
       const res = await fetch("/api/locks/unlock-all", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ service: selectedService }),
       })
 
@@ -107,10 +161,9 @@ export default function LocksList() {
       }
 
       // Refresh the locks list
-      const refreshRes = await fetch(`/api/locks/list`)
-      const refreshData = await refreshRes.json()
-      setLocks(refreshData.locks || [])
-      
+      await fetchLocks(1, selectedService)
+      setCurrentPage(1)
+
       toast.success(data.message || `Unlocked all ${selectedService} locks successfully!`)
     } catch (err) {
       console.error("Bulk unlock error:", err)
@@ -118,6 +171,12 @@ export default function LocksList() {
     } finally {
       setUnlockingAll(false)
     }
+  }
+
+  const goToPage = (page: number) => {
+    const clamped = Math.min(Math.max(page, 1), Math.max(totalPages, 1))
+    setCurrentPage(clamped)
+    fetchLocks(clamped, selectedService)
   }
 
   const formatIST = (dateString?: string) => {
@@ -133,18 +192,7 @@ export default function LocksList() {
     })
   }
 
-  const serviceOptions = ["All", ...Array.from(new Set(locks.map((l) => l.service || "Unknown Service")))]
-
-  const filteredLocks =
-    selectedService === "All"
-      ? locks
-      : locks.filter((l) => (l.service || "Unknown Service") === selectedService)
-
-  const totalPages = Math.ceil(filteredLocks.length / itemsPerPage)
-  const paginatedLocks = filteredLocks.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  )
+  const serviceOptions = ["All", ...serviceNames]
 
   return (
     <div className="space-y-6">
@@ -158,8 +206,12 @@ export default function LocksList() {
             Manage locked phone numbers and unlock them when needed
           </p>
         </div>
-        <Button variant="outline" onClick={() => window.location.reload()}>
-          <RefreshCw className="h-4 w-4 mr-2" />
+        <Button
+          variant="outline"
+          onClick={() => fetchLocks(currentPage, selectedService)}
+          disabled={loading}
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
           Refresh
         </Button>
       </div>
@@ -172,13 +224,10 @@ export default function LocksList() {
           </CardTitle>
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <span className="text-sm text-muted-foreground">
-              {filteredLocks.length} locks
+              {total.toLocaleString()} locks
             </span>
             <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-              <Select value={selectedService} onValueChange={(value) => {
-                setSelectedService(value)
-                setCurrentPage(1)
-              }}>
+              <Select value={selectedService} onValueChange={handleServiceChange}>
                 <SelectTrigger className="w-full sm:w-[180px] md:w-[200px]">
                   <SelectValue placeholder="Filter by service" />
                 </SelectTrigger>
@@ -223,11 +272,14 @@ export default function LocksList() {
                 </div>
               ))}
             </div>
-          ) : filteredLocks.length === 0 ? (
+          ) : locks.length === 0 ? (
             <div className="text-center py-16 space-y-4">
               <Lock className="h-16 w-16 mx-auto opacity-50" />
               <p className="text-muted-foreground text-lg">No locked numbers found</p>
-              <Button variant="outline" onClick={() => window.location.reload()}>
+              <Button
+                variant="outline"
+                onClick={() => fetchLocks(1, selectedService)}
+              >
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Refresh
               </Button>
@@ -246,7 +298,7 @@ export default function LocksList() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedLocks.map((lock) => (
+                  {locks.map((lock) => (
                     <TableRow key={lock._id}>
                       <TableCell className="font-medium">{lock.number}</TableCell>
                       <TableCell>{lock.country || "Unknown"}</TableCell>
@@ -284,28 +336,31 @@ export default function LocksList() {
                 </TableBody>
               </Table>
 
-              {/* Pagination */}
-              {filteredLocks.length > 0 && (
+              {/* Pagination (server-side) */}
+              {total > 0 && (
                 <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-4 p-4">
                   <div className="text-sm text-muted-foreground text-center sm:text-left">
-                    Showing {Math.min(filteredLocks.length, (currentPage - 1) * itemsPerPage + 1)}-
-                    {Math.min(currentPage * itemsPerPage, filteredLocks.length)} of{" "}
-                    {filteredLocks.length} locks
+                    Showing {(currentPage - 1) * itemsPerPage + 1}-
+                    {Math.min(currentPage * itemsPerPage, total)} of{" "}
+                    {total.toLocaleString()} locks
                   </div>
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                      disabled={currentPage === 1}
+                      onClick={() => goToPage(currentPage - 1)}
+                      disabled={currentPage === 1 || loading}
                     >
                       Previous
                     </Button>
+                    <span className="flex items-center px-2 text-sm text-muted-foreground">
+                      Page {currentPage} / {totalPages.toLocaleString()}
+                    </span>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                      disabled={currentPage === totalPages}
+                      onClick={() => goToPage(currentPage + 1)}
+                      disabled={currentPage === totalPages || loading}
                     >
                       Next
                     </Button>
