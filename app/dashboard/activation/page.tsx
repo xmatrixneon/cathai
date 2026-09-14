@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Search, Filter, Calendar, MessageSquare, RefreshCw, History } from "lucide-react"
+import { getCookie } from "@/utils/cookie"
 
 interface Country {
   _id: string
@@ -65,18 +66,33 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [selectedMessages, setSelectedMessages] = useState<string[] | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
   const itemsPerPage = 10
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (page = 1, overrides = {}) => {
+    const { status = statusFilter } = overrides
     setLoading(true)
     try {
-      const query = new URLSearchParams()
+      const token = getCookie("token")
+      const query = new URLSearchParams({
+        page: String(page),
+        limit: String(itemsPerPage),
+        status,
+      })
       if (from) query.append("from", from)
       if (to) query.append("to", to)
+      if (search.trim()) query.append("search", search.trim())
 
-      const res = await fetch(`/api/overview/activation?${query.toString()}`)
+      const res = await fetch(`/api/overview/activation?${query.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       const data = await res.json()
-      if (data.success) setOrders(data.orders)
+      if (data.success) {
+        setOrders(data.orders || [])
+        setTotal(data.total || 0)
+        setTotalPages(data.totalPages || 1)
+      }
     } catch (err) {
       console.error("Error fetching orders:", err)
     }
@@ -84,7 +100,8 @@ export default function OrdersPage() {
   }
 
   useEffect(() => {
-    fetchOrders()
+    fetchOrders(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const formatIST = (dateStr: string) => {
@@ -103,24 +120,18 @@ export default function OrdersPage() {
     return order.isused ? "used" : "pending"
   }
 
-  const filteredOrders = orders.filter((order) => {
-    const query = search.toLowerCase()
-    const matchesSearch =
-      order.number.toString().includes(query) ||
-      order.countryid?.name.toLowerCase().includes(query) ||
-      order.serviceid?.name.toLowerCase().includes(query)
+  const handleStatusChange = (value: string) => {
+    setStatusFilter(value)
+    setCurrentPage(1)
+    // Fetch with the new status value (state update is async)
+    fetchOrders(1, { status: value })
+  }
 
-    const status = getOrderStatus(order)
-    const matchesStatus = statusFilter === "all" || status === statusFilter
-
-    return matchesSearch && matchesStatus
-  })
-
-  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage)
-  const paginatedOrders = filteredOrders.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  )
+  const goToPage = (page: number) => {
+    const clamped = Math.min(Math.max(page, 1), Math.max(totalPages, 1))
+    setCurrentPage(clamped)
+    fetchOrders(clamped)
+  }
 
   return (
     <div className="space-y-6">
@@ -134,7 +145,7 @@ export default function OrdersPage() {
             View and manage your order activation history
           </p>
         </div>
-        <Button variant="outline" onClick={fetchOrders} disabled={loading}>
+        <Button variant="outline" onClick={() => fetchOrders(currentPage)} disabled={loading}>
           <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
@@ -175,10 +186,7 @@ export default function OrdersPage() {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Status</label>
-              <Select value={statusFilter} onValueChange={(value) => {
-                setStatusFilter(value)
-                setCurrentPage(1)
-              }}>
+              <Select value={statusFilter} onValueChange={handleStatusChange}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Filter by status" />
                 </SelectTrigger>
@@ -196,18 +204,21 @@ export default function OrdersPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search orders..."
+                  placeholder="Search number, country, service..."
                   value={search}
                   onChange={(e) => {
                     setSearch(e.target.value)
                     setCurrentPage(1)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") fetchOrders(1)
                   }}
                   className="pl-10"
                 />
               </div>
             </div>
 
-            <Button onClick={fetchOrders}>
+            <Button onClick={() => fetchOrders(1)}>
               <Filter className="h-4 w-4 mr-2" />
               Apply Filters
             </Button>
@@ -218,7 +229,7 @@ export default function OrdersPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Order History</CardTitle>
-          <Badge variant="outline">{filteredOrders.length} orders</Badge>
+          <Badge variant="outline">{total.toLocaleString()} orders</Badge>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -233,13 +244,13 @@ export default function OrdersPage() {
                 </div>
               ))}
             </div>
-          ) : filteredOrders.length === 0 ? (
+          ) : orders.length === 0 ? (
             <div className="text-center py-16 space-y-4">
               <div className="text-muted-foreground text-lg">
                 <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-50" />
                 <p>No orders found matching your criteria</p>
               </div>
-              <Button variant="outline" onClick={fetchOrders}>
+              <Button variant="outline" onClick={() => fetchOrders(1)}>
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Refresh
               </Button>
@@ -260,7 +271,7 @@ export default function OrdersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {paginatedOrders.map((order) => (
+                    {orders.map((order) => (
                       <TableRow key={order._id}>
                         <TableCell className="font-medium">{order.number}</TableCell>
                         <TableCell>
@@ -326,28 +337,31 @@ export default function OrdersPage() {
                 </Table>
               </div>
 
-              {/* Pagination */}
-              {filteredOrders.length > 0 && (
+              {/* Pagination (server-side) */}
+              {total > 0 && (
                 <div className="flex items-center justify-between mt-4">
                   <div className="text-sm text-muted-foreground">
-                    Showing {Math.min(filteredOrders.length, (currentPage - 1) * itemsPerPage + 1)}-
-                    {Math.min(currentPage * itemsPerPage, filteredOrders.length)} of{" "}
-                    {filteredOrders.length} orders
+                    Showing {(currentPage - 1) * itemsPerPage + 1}-
+                    {Math.min(currentPage * itemsPerPage, total)} of{" "}
+                    {total.toLocaleString()} orders
                   </div>
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                      disabled={currentPage === 1}
+                      onClick={() => goToPage(currentPage - 1)}
+                      disabled={currentPage === 1 || loading}
                     >
                       Previous
                     </Button>
+                    <span className="flex items-center px-2 text-sm text-muted-foreground">
+                      Page {currentPage} / {totalPages.toLocaleString()}
+                    </span>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                      disabled={currentPage === totalPages}
+                      onClick={() => goToPage(currentPage + 1)}
+                      disabled={currentPage === totalPages || loading}
                     >
                       Next
                     </Button>
