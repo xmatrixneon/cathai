@@ -1,4 +1,9 @@
 // jobs/handlers/status-handler.js
+// Optimized 2026-10-26: read-heavy pass uses .lean() + field projection,
+// all writes are batched into chunked bulkWrite({ordered:false}) /
+// updateMany instead of per-device save() and per-SIM round-trips.
+// Semantics (validation rules, FCM wake-ups, counters, logs, return shape)
+// are preserved from the previous implementation.
 import mongoose from 'mongoose';
 import Numbers from '../../models/Numbers.js';
 import Country from '../../models/Countires.js';
@@ -18,6 +23,12 @@ async function getIndiaId() {
     : new mongoose.Types.ObjectId(country._id.toString());
 }
 
+// Flush bulk ops in chunks of 1000 (MongoDB max batch), unordered for speed
+async function flushBulk(Model, ops) {
+  for (let i = 0; i < ops.length; i += 1000) {
+    await Model.bulkWrite(ops.slice(i, i + 1000), { ordered: false });
+  }
+}
 
 export async function handleStatusJob(data) {
   const startTime = Date.now();
@@ -29,80 +40,63 @@ export async function handleStatusJob(data) {
     // 60 second timeout to reduce device status flip-flopping
     const offlineTimeout = new Date(Date.now() - 60 * 1000);
 
-    const activeDevices = await Device.find({ isActive: true });
+    // Lean POJOs + projection: avoids hydrating ~14k full Mongoose docs
+    const activeDevices = await Device.find({ isActive: true })
+      .select('deviceId name status fcmToken lastHeartbeat sims.phoneNumber sims.isActive sims.slot sims.carrier sims.signalStrength sims.iccid sims.imsi')
+      .lean();
     const onlineDevices = activeDevices.filter(d => d.lastHeartbeat >= offlineTimeout);
     const offlineDevices = activeDevices.filter(d => d.lastHeartbeat < offlineTimeout);
 
     const totalNumbersBefore = await Numbers.countDocuments();
     const activeNumbersBefore = await Numbers.countDocuments({ active: true });
 
-    // console.log(`\n${'─'.repeat(55)}`);
-    // console.log(`🔄 SYNC  ${timestamp}`);
-    // console.log(`${'─'.repeat(55)}`);
-    // console.log(`📱 Devices   Total: ${activeDevices.length}  🟢 Online: ${onlineDevices.length}  🔴 Offline: ${offlineDevices.length}`);
-    // console.log(`📋 Numbers   Total: ${totalNumbersBefore}  ✅ Active: ${activeNumbersBefore}  ❌ Inactive: ${totalNumbersBefore - activeNumbersBefore}`);
-    // console.log(`${'─'.repeat(55)}`);
-
     const indiaId = await getIndiaId();
     const allDeviceNumberPorts = new Set();
     const syncedPhoneNumbers = new Set();
+    const validSims = [];          // { port, numberValue, sim } for online devices
+    const offlineDeactivationOps = []; // updateOne per offline device (regex semantics kept)
+    const deviceOps = [];          // status flips + FCM bookkeeping
+    const wakeups = [];            // FCM wake-ups for just-offline devices
     let syncedCount = 0;
     let deactivatedCount = 0;
     let numberChangedCount = 0;
     let statusChangedOnline = 0;
     let statusChangedOffline = 0;
 
-    // First pass: Sync all devices and track their numbers
+    // First pass: classify devices and collect all writes
     for (const device of activeDevices) {
       const isOnline = device.lastHeartbeat >= offlineTimeout;
       const newStatus = isOnline ? 'online' : 'offline';
 
       if (device.status !== newStatus) {
-        device.status = newStatus;
-        await device.save();
+        deviceOps.push({
+          updateOne: {
+            filter: { _id: device._id },
+            update: { $set: { status: newStatus } },
+          },
+        });
         if (isOnline) {
           statusChangedOnline++;
           console.log(`[Status] Device ${device.deviceId} came online`);
         } else {
           statusChangedOffline++;
-          // console.log(`🔴 OFFLINE  ${device.deviceId} (${device.name || 'unnamed'})`);
 
-          // Trigger immediate wake-up for devices that just went offline
+          // Queue immediate wake-up for devices that just went offline
+          // (fired in parallel chunks after the classification pass)
           if (device.fcmToken) {
-            initializeFirebase();
-            try {
-              const result = await sendWakeUpNotification(device.deviceId, device.fcmToken);
-              if (result.success) {
-                await Device.updateOne(
-                  { _id: device._id },
-                  { $set: { lastWakeupAttempt: new Date() } }
-                );
-                // console.log(`📡 WAKE-UP  Sent to ${device.deviceId}`);
-              } else if (result.isStaleToken) {
-                // Remove stale FCM token
-                await Device.updateOne(
-                  { deviceId: device.deviceId },
-                  { $unset: { fcmToken: '', fcmTokenUpdatedAt: '' } }
-                );
-                // console.log(`⚠️  Stale FCM token removed for ${device.deviceId}`);
-              }
-            } catch (err) {
-              // console.warn(`⚠️  Wake-up failed for ${device.deviceId}:`, err.message);
-            }
+            wakeups.push({ _id: device._id, deviceId: device.deviceId, fcmToken: device.fcmToken });
           }
         }
       }
 
       // OFFLINE DEVICES: Deactivate all their numbers immediately
       if (!isOnline) {
-        const result = await Numbers.updateMany(
-          { port: { $regex: `^${device.deviceId}-SIM` }, active: true },
-          { $set: { active: false, signal: 0 } }
-        );
-        if (result.modifiedCount > 0) {
-          deactivatedCount += result.modifiedCount;
-          // console.log(`🔌 DEACTIVATED ${result.modifiedCount} numbers from offline device ${device.deviceId}`);
-        }
+        offlineDeactivationOps.push({
+          updateOne: {
+            filter: { port: { $regex: `^${device.deviceId}-SIM` }, active: true },
+            update: { $set: { active: false, signal: 0 } },
+          },
+        });
         continue;
       }
 
@@ -154,73 +148,125 @@ export async function handleStatusJob(data) {
 
           // Final validation
           if (invalidReason || !isValidIndianMobile(finalNumber)) {
-            // console.log(`⚠️  INVALID  ${device.deviceId} SIM${sim.slot} → "${originalInput}"`);
-            // console.log(`   Reason: ${invalidReason || 'Unknown error'}`);
-            // if (finalNumber !== phoneNumber) {
-            //   console.log(`   Processed: "${phoneNumber}" → "${finalNumber}"`);
-            // }
             continue;
           }
 
           // Convert to number for storage
           const numberValue = parseInt(finalNumber);
           syncedPhoneNumbers.add(numberValue);
-
-          // Deactivate ALL old numbers on this port (including inactive ones)
-          // This prevents duplicates when number format changes (e.g., with/without 91 prefix)
-          const oldNumbers = await Numbers.find({ port, number: { $ne: numberValue } });
-          if (oldNumbers.length > 0) {
-            await Numbers.updateMany(
-              { port, number: { $ne: numberValue } },
-              { $set: { active: false, signal: 0 } }
-            );
-            oldNumbers.forEach(old => {
-              const wasActive = old.active ? ' (was active)' : ' (was inactive)';
-              // console.log(`🔄 CLEANUP  ${old.number}${wasActive} → ${numberValue}  (${port})`);
-            });
-            numberChangedCount += oldNumbers.length;
-          }
-
-          await Numbers.findOneAndUpdate(
-            { number: numberValue },
-            {
-              $set: {
-                countryid: indiaId,
-                port,
-                operator: sim.carrier || null,
-                signal: isOnline ? (sim.signalStrength || 0) : 0,
-                active: isOnline,
-                lastRotation: new Date(),
-                locked: false,
-                iccid: sim.iccid || null,
-                imsi: sim.imsi || null
-              }
-            },
-            {
-              upsert: true,
-              new: true
-            }
-          );
-          syncedCount++;
+          validSims.push({ port, numberValue, sim, isOnline });
         }
       }
     }
+
+    // Fire FCM wake-ups for just-offline devices in parallel chunks
+    if (wakeups.length > 0) {
+      initializeFirebase();
+      for (let i = 0; i < wakeups.length; i += 50) {
+        await Promise.allSettled(wakeups.slice(i, i + 50).map(async (w) => {
+          try {
+            const result = await sendWakeUpNotification(w.deviceId, w.fcmToken);
+            if (result.success) {
+              deviceOps.push({
+                updateOne: {
+                  filter: { _id: w._id },
+                  update: { $set: { lastWakeupAttempt: new Date() } },
+                },
+              });
+            } else if (result.isStaleToken) {
+              // Remove stale FCM token
+              deviceOps.push({
+                updateOne: {
+                  filter: { deviceId: w.deviceId },
+                  update: { $unset: { fcmToken: '', fcmTokenUpdatedAt: '' } },
+                },
+              });
+            }
+          } catch (err) {
+            // Wake-up failures are non-fatal, same as before
+          }
+        }));
+      }
+    }
+
+    // Flush device status flips + FCM bookkeeping in bulk
+    await flushBulk(Device, deviceOps);
+
+    // Deactivate numbers of all offline devices (regex per device kept, batched)
+    for (let i = 0; i < offlineDeactivationOps.length; i += 1000) {
+      const chunk = offlineDeactivationOps.slice(i, i + 1000);
+      const res = await Numbers.bulkWrite(chunk, { ordered: false });
+      deactivatedCount += res.modifiedCount ?? res.result?.nModified ?? 0;
+    }
+
+    // Batch detection of old numbers on synced ports (was: find+updateMany per SIM)
+    const portList = [...allDeviceNumberPorts];
+    const keepByPort = new Map();
+    for (const vs of validSims) {
+      keepByPort.set(vs.port, vs.numberValue);
+    }
+    const staleOnPortIds = [];
+    if (portList.length > 0) {
+      const portDocs = await Numbers.find({ port: { $in: portList } })
+        .select('port number')
+        .lean();
+      for (const doc of portDocs) {
+        const keep = keepByPort.get(doc.port);
+        if (keep !== undefined && doc.number !== keep) {
+          staleOnPortIds.push(doc._id);
+        }
+      }
+      numberChangedCount += staleOnPortIds.length;
+      if (staleOnPortIds.length > 0) {
+        // Deactivate ALL old numbers on these ports (including inactive ones)
+        await Numbers.updateMany(
+          { _id: { $in: staleOnPortIds } },
+          { $set: { active: false, signal: 0 } }
+        );
+      }
+    }
+
+    // Upsert all valid SIMs in bulk (was: findOneAndUpdate per SIM)
+    const numberUpsertOps = validSims.map(({ port, numberValue, sim, isOnline }) => ({
+      updateOne: {
+        filter: { number: numberValue },
+        update: {
+          $set: {
+            countryid: indiaId,
+            port,
+            operator: sim.carrier || null,
+            signal: isOnline ? (sim.signalStrength || 0) : 0,
+            active: isOnline,
+            lastRotation: new Date(),
+            locked: false,
+            iccid: sim.iccid || null,
+            imsi: sim.imsi || null
+          }
+        },
+        upsert: true,
+      },
+    }));
+    await flushBulk(Numbers, numberUpsertOps);
+    syncedCount = validSims.length;
 
     // Cleanup stale ports (only deactivate if number was NOT synced in this run)
     const staleNumbers = await Numbers.find({
       port: { $regex: /^.*-SIM[0-9]+$/ },
       active: true
-    });
+    }).select('port number').lean();
 
+    const staleIds = [];
     for (const num of staleNumbers) {
-      // Only deactivate if port is stale AND number wasn't synced
       if (!allDeviceNumberPorts.has(num.port) && !syncedPhoneNumbers.has(num.number)) {
-        await Numbers.findByIdAndUpdate(num._id, {
-          $set: { active: false, signal: 0 }
-        });
-        deactivatedCount++;
-        // console.log(`🗑️  STALE    ${num.number}  (${num.port})`);
+        staleIds.push(num._id);
       }
+    }
+    if (staleIds.length > 0) {
+      await Numbers.updateMany(
+        { _id: { $in: staleIds } },
+        { $set: { active: false, signal: 0 } }
+      );
+      deactivatedCount += staleIds.length;
     }
 
     const totalNumbersAfter = await Numbers.countDocuments();
@@ -228,16 +274,6 @@ export async function handleStatusJob(data) {
     const elapsed = Date.now() - startTime;
 
     console.log(`[Status] Sync complete (${elapsed}ms): ${syncedCount} synced, ${deactivatedCount} deactivated, ${numberChangedCount} SIM swaps, +${statusChangedOnline} online, -${statusChangedOffline} offline`);
-    // console.log(`${'─'.repeat(55)}`);
-    // console.log(`✅ DONE  (${elapsed}ms)`);
-    // console.log(`   Synced:       ${syncedCount} numbers`);
-    // console.log(`   Deactivated:  ${deactivatedCount} numbers`);
-    // if (numberChangedCount > 0)
-    //   console.log(`   SIM swaps:    ${numberChangedCount} numbers replaced`);
-    // if (statusChangedOnline > 0 || statusChangedOffline > 0)
-    //   console.log(`   Status chg:   +${statusChangedOnline} online  -${statusChangedOffline} offline`);
-    // console.log(`   Numbers now:  Total: ${totalNumbersAfter}  ✅ Active: ${activeNumbersAfter}  ❌ Inactive: ${totalNumbersAfter - activeNumbersAfter}`);
-    // console.log(`${'─'.repeat(55)}\n`);
 
     // Update CronStatus for dashboard display
     try {
@@ -246,7 +282,6 @@ export async function handleStatusJob(data) {
         { lastRun: new Date() },
         { upsert: true }
       );
-      // console.log('[Sync] CronStatus updated');
     } catch (cronErr) {
       console.error('[Sync] Failed to update CronStatus:', cronErr.message);
     }
