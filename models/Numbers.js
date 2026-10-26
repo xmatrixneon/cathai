@@ -56,14 +56,12 @@ const NumbersSchema = new mongoose.Schema({
     type: Number,
     default: 100,
     min: 0,
-    max: 100,
-    index: true
+    max: 100
   },
   // Suspension state
   suspended: {
     type: Boolean,
-    default: false,
-    index: true
+    default: false
   },
   suspensionReason: {
     type: String,
@@ -124,22 +122,9 @@ const NumbersSchema = new mongoose.Schema({
   }
 });
 
-// Performance indexes for quality management
-NumbersSchema.index({ qualityScore: 1, suspended: 1, active: 1 });
-NumbersSchema.index({ suspended: 1, suspendedAt: 1 });
-NumbersSchema.index({ 'recentFailures.failedAt': 1 });
-
-// Additional performance optimization indexes
+// Only indexes with real query traffic are kept (verified via $indexStats,
+// 0-use ones removed 2026-09-26 to halve write amplification on status sync).
 NumbersSchema.index({ active: 1, countryid: 1 });
-NumbersSchema.index({
-  active: 1,
-  suspended: 1,
-  countryid: 1,
-  qualityScore: -1,
-  operator: 1,
-  signal: -1
-});
-NumbersSchema.index({ active: 1, suspended: 1, operator: 1, qualityScore: -1 });
 NumbersSchema.index({ port: 1, active: 1, 'sims.phoneNumber': 1 });
 
 // Prevent model overwrite in dev

@@ -121,13 +121,9 @@ const deviceSchema = new mongoose.Schema({
 
 deviceSchema.index({ status: 1 });
 deviceSchema.index({ lastHeartbeat: 1 });
-deviceSchema.index({ 'sims.phoneNumber': 1 });
-deviceSchema.index({ isFavorite: 1 });
-deviceSchema.index({ fcmToken: 1 });
-// FIX #8: Index on sims.slot supports the positional $ operator queries used in
-// handleCallForwardingResponse — findOneAndUpdate({ "sims.slot": N }, { "sims.$": ... })
-// performs a collection scan without this index on large device collections.
-deviceSchema.index({ 'sims.slot': 1 });
+// sims.phoneNumber / isFavorite / fcmToken / sims.slot indexes removed 2026-09-26 —
+// $indexStats showed 0 uses over 9 days while every fleet-wide status write paid
+// for them. (sims.slot call-forwarding queries now scan; ~50k docs, rare op.)
 
 deviceSchema.methods.updateStatus = function (status) {
   this.status = status;
