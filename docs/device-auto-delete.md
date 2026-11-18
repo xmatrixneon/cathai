@@ -153,3 +153,26 @@ node script/delete-stale-devices.mjs --before 2026-10-31T18:30:00Z
   cycle until the backlog drains (1000/15s ≈ 240k/hour)
 - Verify with: oldest remaining `lastHeartbeat` should sit at/just past the
   cutoff once the backlog is drained
+
+## Incident runbook (2026-11-18 outage)
+
+Symptom: dashboard shows the sync going "Stale"; queue shows
+`active: 1, delayed: 0` and jobs that used to take ~7s run for many minutes.
+
+1. **Diagnose**: time the hot query shape from a tight loop. Server-side
+   `executionStats.executionTimeMillis` ~1ms but wall-clock ~45ms/op = plan
+   cache poisoning (bad plan cached for a shared query shape).
+2. **Fix live** (no restart needed):
+   `db.runCommand({ planCacheClear: "numbers" })` — measured 44.9ms → 3.3ms/op.
+   In-flight jobs complete on their own once remaining ops are fast.
+3. **Reseed a dead chain**: the chain schedules its successor only on job
+   completion, and there is no startup self-seed. If `delayed == 0`, add one
+   job (`addStatusJob()` / queue API). If a formerly-stuck job later completes
+   and schedules its own successor, dedupe back to one delayed job.
+4. **Prevent recurrence**: never send `$regex` alternations against the port
+   field (the `$in`-on-exact-ports code above is the fix).
+
+Chain-fragility note: because the successor is only added on completion, any
+handler that can hang or run unboundedly long kills the schedule forever.
+Consider a watchdog job or self-seed on startup (`delayed+waiting+active == 0`)
+for chains that must never die.
