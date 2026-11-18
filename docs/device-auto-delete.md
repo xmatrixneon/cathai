@@ -1,6 +1,6 @@
 # Device Auto-Deletion (30-Day Offline Threshold)
 
-Portable documentation of commit `1452da3` (2026-11-18). Replicate this in any
+Portable documentation of commits `1452da3` + `a5700b4` (2026-11-18). Replicate this in any
 gateway-style project where Android/IoT devices register and heartbeat, and
 abandoned devices otherwise accumulate forever.
 
@@ -104,7 +104,7 @@ async function cleanupStaleDevices() {
 | Choice | Reason |
 |---|---|
 | `limit(maxPerRun)` (1000/run) | After enabling on a dirty DB the backlog can be tens of thousands; a cap keeps each 15s sync fast and drains the backlog gradually |
-| `.select('deviceId').lean()` | Don't hydrate full docs — 41k full documents OOM'd the worker before |
+| `.select('deviceId sims.slot').lean()` | Don't hydrate full docs — 41k full documents OOM'd the worker before; slots are needed to build exact ports |
 | Numbers deactivated, not deleted | Quality history survives SIM reuse |
 | `isActive: true` filter | Respect soft-deleted devices separately |
 | Exact `$in` on port values | Numbers reference devices only via `{deviceId}-SIM{slot}` port strings (no FK). **Never** use `$regex` alternations on this field — they bypass index prefix bounds and poison the plan cache for every other regex query on the same shape |
