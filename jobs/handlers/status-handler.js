@@ -44,7 +44,7 @@ async function cleanupStaleDevices() {
   const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
 
   const stale = await Device.find({ lastHeartbeat: { $lt: cutoff }, isActive: true })
-    .select('deviceId')
+    .select('deviceId sims.slot')
     .lean()
     .limit(maxPerRun);
   if (stale.length === 0) {
@@ -55,13 +55,26 @@ async function cleanupStaleDevices() {
 
   await Message.deleteMany({ 'metadata.deviceId': { $in: ids } });
 
-  // Deactivate any still-active numbers on those ports; deviceIds are hex but
-  // escape anyway in case non-hex ids ever appear
-  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  for (let i = 0; i < ids.length; i += 100) {
-    const alternation = ids.slice(i, i + 100).map(escapeRegex).join('|');
+  // Deactivate any still-active numbers on those ports using exact ports, NOT
+  // regex alternation (`^(id1|id2|...)-SIM`). Alternation regexes can't use the
+  // port index prefix bounds; the planner picks a full active-index scan and the
+  // bad plan is cached for the shared {port: {$regex}, active} query shape that
+  // the sync's per-device deactivations also use (2026-11-18: this poisoned the
+  // cache, 45ms/op × 15k ops, syncs never completed, chain died). Ports absent
+  // from the device's last sims are cleaned up by the sync's stale-port pass.
+  const ports = [];
+  for (const d of stale) {
+    if (Array.isArray(d.sims)) {
+      for (const sim of d.sims) {
+        if (sim && sim.slot) {
+          ports.push(`${d.deviceId}-SIM${sim.slot}`);
+        }
+      }
+    }
+  }
+  for (let i = 0; i < ports.length; i += 1000) {
     await Numbers.updateMany(
-      { port: { $regex: `^(${alternation})-SIM` }, active: true },
+      { port: { $in: ports.slice(i, i + 1000) }, active: true },
       { $set: { active: false, signal: 0 } }
     );
   }
