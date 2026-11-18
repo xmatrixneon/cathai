@@ -8,6 +8,7 @@ import mongoose from 'mongoose';
 import Numbers from '../../models/Numbers.js';
 import Country from '../../models/Countires.js';
 import Device from '../../models/Device.js';
+import Message from '../../models/Message.js';
 import CronStatus from '../../models/Cron.js';
 import { sendWakeUpNotification } from '../../lib/fcm/send.js';
 import { initializeFirebase } from '../../lib/fcm/index.js';
@@ -28,6 +29,46 @@ async function flushBulk(Model, ops) {
   for (let i = 0; i < ops.length; i += 1000) {
     await Model.bulkWrite(ops.slice(i, i + 1000), { ordered: false });
   }
+}
+
+// Delete devices offline longer than DEVICE_AUTO_DELETE_HOURS (default 720 = 30 days).
+// Capped per run so a large backlog can't stall the 15s sync job. Number docs are
+// deactivated, not deleted, so quality history survives if a SIM returns.
+async function cleanupStaleDevices() {
+  const enabled = process.env.DEVICE_AUTO_DELETE_ENABLED !== 'false';
+  if (!enabled) {
+    return { deleted: 0, enabled: false };
+  }
+  const hours = parseInt(process.env.DEVICE_AUTO_DELETE_HOURS || '720', 10);
+  const maxPerRun = parseInt(process.env.DEVICE_AUTO_DELETE_MAX_PER_RUN || '1000', 10);
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+  const stale = await Device.find({ lastHeartbeat: { $lt: cutoff }, isActive: true })
+    .select('deviceId')
+    .lean()
+    .limit(maxPerRun);
+  if (stale.length === 0) {
+    return { deleted: 0, enabled: true };
+  }
+
+  const ids = stale.map(d => d.deviceId);
+
+  await Message.deleteMany({ 'metadata.deviceId': { $in: ids } });
+
+  // Deactivate any still-active numbers on those ports; deviceIds are hex but
+  // escape anyway in case non-hex ids ever appear
+  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (let i = 0; i < ids.length; i += 100) {
+    const alternation = ids.slice(i, i + 100).map(escapeRegex).join('|');
+    await Numbers.updateMany(
+      { port: { $regex: `^(${alternation})-SIM` }, active: true },
+      { $set: { active: false, signal: 0 } }
+    );
+  }
+
+  await Device.deleteMany({ deviceId: { $in: ids } });
+  console.log(`[Status] Auto-delete: removed ${ids.length} device(s) offline >${hours}h`);
+  return { deleted: ids.length, enabled: true };
 }
 
 export async function handleStatusJob(data) {
@@ -275,6 +316,10 @@ export async function handleStatusJob(data) {
 
     console.log(`[Status] Sync complete (${elapsed}ms): ${syncedCount} synced, ${deactivatedCount} deactivated, ${numberChangedCount} SIM swaps, +${statusChangedOnline} online, -${statusChangedOffline} offline`);
 
+    // Delete devices offline beyond the retention threshold (runs after the sync
+    // so a slow deletion never delays status flips / number sync)
+    const autoDelete = await cleanupStaleDevices();
+
     // Update CronStatus for dashboard display
     try {
       await CronStatus.findOneAndUpdate(
@@ -304,6 +349,7 @@ export async function handleStatusJob(data) {
         numbersAfter: totalNumbersAfter,
         activeNumbersBefore,
         activeNumbersAfter,
+        autoDeletedDevices: autoDelete.deleted,
       },
     };
   } catch (error) {

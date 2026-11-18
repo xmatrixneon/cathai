@@ -14,7 +14,7 @@ Next.js 15 application managing Android devices that act as SMS gateways. Tracks
 - Dashboard connects via WebSocket to `/gateway?client=dashboard`
 - Devices send heartbeats, SMS events, and call forwarding responses
 - Background script syncs device status to Numbers collection every 15 seconds
-- Device auto-deletion after 24+ hours offline (configurable via `DEVICE_AUTO_DELETE_*` env vars)
+- Device auto-deletion after 30 days offline (configurable via `DEVICE_AUTO_DELETE_*` env vars, enforced in `worker:status`)
 
 ### 2. Stubs API (`/var/www/html/stubs/`)
 PHP-based SMS activation API that provides external interface for requesting phone numbers and receiving OTP codes. Connects to the same MongoDB database.
@@ -150,7 +150,7 @@ Runs via BullMQ scheduling every 15 seconds:
 2. **Number sync** - Syncs active SIM phone numbers to `Numbers` collection
 3. **SIM swap detection** - Deactivates old number when SIM changes on same port
 4. **Stale number cleanup** - Deactivates numbers not synced in current run
-5. **Device auto-deletion** - Deletes devices offline for 24+ hours (configurable)
+5. **Device auto-deletion** - Deletes devices offline beyond the threshold (default 720h = 30 days; capped per run via `DEVICE_AUTO_DELETE_MAX_PER_RUN`). Messages are deleted, numbers are deactivated (kept for quality history). Re-added 2026-11-18 after being removed in f3d5723 caused 41k+ zombie devices
 
 **Key behaviors:**
 - OFFLINE devices: All their numbers are immediately deactivated
@@ -383,7 +383,8 @@ Optional:
 - `PORT` - Server port (default: 3000)
 - `REDIS_DB` - Redis database number (default: 0)
 - `DEVICE_AUTO_DELETE_ENABLED` - Enable auto-delete (default: true)
-- `DEVICE_AUTO_DELETE_HOURS` - Offline hours before deletion (default: 24)
+- `DEVICE_AUTO_DELETE_HOURS` - Offline hours before deletion (default: 720 = 30 days)
+- `DEVICE_AUTO_DELETE_MAX_PER_RUN` - Max devices deleted per status-worker run (default: 1000)
 - `MOBILE_API_KEY` - API key for mobile app (optional but recommended)
 
 **BullMQ Worker Enable/Disable:**
