@@ -69,6 +69,8 @@ export default function DashboardContent() {
     today: { total: number; online: number; offline: number }
     yesterday: { total: number; online: number; offline: number }
     last24h?: { total: number; online: number; offline: number }
+    todayRegistrations?: { total: number; online: number; offline: number }
+    yesterdayRegistrations?: { total: number; online: number; offline: number }
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -252,20 +254,20 @@ export default function DashboardContent() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{deviceStats ? deviceStats.today.total : "-"}</div>
+                <div className="text-3xl font-bold">{deviceStats ? (deviceStats.todayRegistrations || deviceStats.today).total : "-"}</div>
                 <p className="text-xs text-muted-foreground">
-                  Online: {deviceStats?.today.online || 0} | Offline: {deviceStats?.today.offline || 0}
+                  Online: {(deviceStats?.todayRegistrations || deviceStats?.today)?.online || 0} | Offline: {(deviceStats?.todayRegistrations || deviceStats?.today)?.offline || 0}
                 </p>
-                {deviceStats && deviceStats.yesterday.total > 0 && (
+                {deviceStats && (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total > 0 && (
                   <div className="flex items-center mt-1">
-                    {deviceStats.today.total >= deviceStats.yesterday.total ? (
+                    {(deviceStats.todayRegistrations || deviceStats.today).total >= (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total ? (
                       <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
                     ) : (
                       <TrendingDown className="h-3 w-3 text-red-500 mr-1" />
                     )}
-                    <span className={`text-xs ${deviceStats.today.total >= deviceStats.yesterday.total ? 'text-green-600' : 'text-red-600'}`}>
-                      {deviceStats.yesterday.total > 0
-                        ? `${((deviceStats.today.total - deviceStats.yesterday.total) / deviceStats.yesterday.total * 100).toFixed(0)}% vs yesterday`
+                    <span className={`text-xs ${(deviceStats.todayRegistrations || deviceStats.today).total >= (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total ? 'text-green-600' : 'text-red-600'}`}>
+                      {(deviceStats.yesterdayRegistrations || deviceStats.yesterday).total > 0
+                        ? `${(((deviceStats.todayRegistrations || deviceStats.today).total - (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total) / (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total * 100).toFixed(0)}% vs yesterday`
                         : 'New baseline'}
                     </span>
                   </div>
@@ -281,9 +283,9 @@ export default function DashboardContent() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{deviceStats ? deviceStats.yesterday.total : "-"}</div>
+                <div className="text-3xl font-bold">{deviceStats ? (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total : "-"}</div>
                 <p className="text-xs text-muted-foreground">
-                  Online: {deviceStats?.yesterday.online || 0} | Offline: {deviceStats?.yesterday.offline || 0}
+                  Online: {(deviceStats?.yesterdayRegistrations || deviceStats?.yesterday)?.online || 0} | Offline: {(deviceStats?.yesterdayRegistrations || deviceStats?.yesterday)?.offline || 0}
                 </p>
               </CardContent>
             </Card>
@@ -292,20 +294,17 @@ export default function DashboardContent() {
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
                   <Activity className="h-4 w-4" />
-                  Online Rate (24h)
+                  Today Online Rate
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold">
-                  {/* Prefer devices seen in last 24h; fall back to today's
-                      registration cohort while the cached API response
-                      predates the last24h field. */}
-                  {deviceStats && (deviceStats.last24h || deviceStats.today).total > 0
-                    ? `${((deviceStats.last24h || deviceStats.today).online / (deviceStats.last24h || deviceStats.today).total * 100).toFixed(0)}%`
+                  {deviceStats && deviceStats.today.total > 0
+                    ? `${(deviceStats.today.online / deviceStats.today.total * 100).toFixed(0)}%`
                     : "-"}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {(deviceStats?.last24h || deviceStats?.today)?.online || 0} of {(deviceStats?.last24h || deviceStats?.today)?.total || 0} devices seen in 24h online
+                  {deviceStats?.today.online || 0} of {deviceStats?.today.total || 0} devices online
                 </p>
               </CardContent>
             </Card>
