@@ -68,9 +68,6 @@ export default function DashboardContent() {
   const [deviceStats, setDeviceStats] = useState<{
     today: { total: number; online: number; offline: number }
     yesterday: { total: number; online: number; offline: number }
-    last24h?: { total: number; online: number; offline: number }
-    todayRegistrations?: { total: number; online: number; offline: number }
-    yesterdayRegistrations?: { total: number; online: number; offline: number }
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -254,20 +251,20 @@ export default function DashboardContent() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{deviceStats ? (deviceStats.todayRegistrations || deviceStats.today).total : "-"}</div>
+                <div className="text-3xl font-bold">{deviceStats ? deviceStats.today.total : "-"}</div>
                 <p className="text-xs text-muted-foreground">
-                  Online: {(deviceStats?.todayRegistrations || deviceStats?.today)?.online || 0} | Offline: {(deviceStats?.todayRegistrations || deviceStats?.today)?.offline || 0}
+                  Online: {deviceStats?.today.online || 0} | Offline: {deviceStats?.today.offline || 0}
                 </p>
-                {deviceStats && (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total > 0 && (
+                {deviceStats && deviceStats.yesterday.total > 0 && (
                   <div className="flex items-center mt-1">
-                    {(deviceStats.todayRegistrations || deviceStats.today).total >= (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total ? (
+                    {deviceStats.today.total >= deviceStats.yesterday.total ? (
                       <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
                     ) : (
                       <TrendingDown className="h-3 w-3 text-red-500 mr-1" />
                     )}
-                    <span className={`text-xs ${(deviceStats.todayRegistrations || deviceStats.today).total >= (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total ? 'text-green-600' : 'text-red-600'}`}>
-                      {(deviceStats.yesterdayRegistrations || deviceStats.yesterday).total > 0
-                        ? `${(((deviceStats.todayRegistrations || deviceStats.today).total - (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total) / (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total * 100).toFixed(0)}% vs yesterday`
+                    <span className={`text-xs ${deviceStats.today.total >= deviceStats.yesterday.total ? 'text-green-600' : 'text-red-600'}`}>
+                      {deviceStats.yesterday.total > 0
+                        ? `${((deviceStats.today.total - deviceStats.yesterday.total) / deviceStats.yesterday.total * 100).toFixed(0)}% vs yesterday`
                         : 'New baseline'}
                     </span>
                   </div>
@@ -283,9 +280,9 @@ export default function DashboardContent() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{deviceStats ? (deviceStats.yesterdayRegistrations || deviceStats.yesterday).total : "-"}</div>
+                <div className="text-3xl font-bold">{deviceStats ? deviceStats.yesterday.total : "-"}</div>
                 <p className="text-xs text-muted-foreground">
-                  Online: {(deviceStats?.yesterdayRegistrations || deviceStats?.yesterday)?.online || 0} | Offline: {(deviceStats?.yesterdayRegistrations || deviceStats?.yesterday)?.offline || 0}
+                  Online: {deviceStats?.yesterday.online || 0} | Offline: {deviceStats?.yesterday.offline || 0}
                 </p>
               </CardContent>
             </Card>
