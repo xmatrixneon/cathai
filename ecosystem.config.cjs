@@ -112,9 +112,32 @@ module.exports = {
         // min; freshly-dropped devices still wake next cycle (their
         // lastWakeupAttempt is stale).
         FCM_WAKE_UP_COOLDOWN: '30',
+        // 2000/cycle rotates the full ~15.5k offline-with-FCM fleet in ~8
+        // cycles (~16 min) instead of ~31 (~62 min at the old 500 cap).
+        // Cooldown above still caps per-device pings at one per 30 min.
+        // NOTE: values here WIN over .env (dotenv does not override
+        // pre-set process env) — keep .env in sync cosmetically only.
+        FCM_WAKE_UP_MAX_DEVICES: '2000',
       },
       // Optimized memory for 62GB RAM system
       node_args: '--max-old-space-size=1024', // 1GB heap, PM2 restarts at 900MB
+    },
+
+    // Queue-Chain Watchdog - seeds dead worker chains, restarts hung workers.
+    // Ported from sunmine (2026-11-20); guards against the status-chain
+    // death failure mode already observed on this box (plan-cache incident).
+    {
+      name: 'worker:watchdog',
+      script: 'workers/watchdog-worker.js',
+      instances: 1,
+      max_memory_restart: '400M',
+      env: {
+        WATCHDOG_ENABLED: 'true',
+        WATCHDOG_INTERVAL_SECONDS: '60',
+        WATCHDOG_RESTART_COOLDOWN_SECONDS: '600',
+        WATCHDOG_DRY_RUN: 'false',
+      },
+      node_args: '--max-old-space-size=512',
     },
 
     // Quality Suspend Worker - SMS quality monitoring (every 15 min)

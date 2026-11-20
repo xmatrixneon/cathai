@@ -68,6 +68,7 @@ export default function DashboardContent() {
   const [deviceStats, setDeviceStats] = useState<{
     today: { total: number; online: number; offline: number }
     yesterday: { total: number; online: number; offline: number }
+    last24h?: { total: number; online: number; offline: number }
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -291,17 +292,20 @@ export default function DashboardContent() {
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
                   <Activity className="h-4 w-4" />
-                  Today Online Rate
+                  Online Rate (24h)
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold">
-                  {deviceStats && deviceStats.today.total > 0
-                    ? `${(deviceStats.today.online / deviceStats.today.total * 100).toFixed(0)}%`
+                  {/* Prefer devices seen in last 24h; fall back to today's
+                      registration cohort while the cached API response
+                      predates the last24h field. */}
+                  {deviceStats && (deviceStats.last24h || deviceStats.today).total > 0
+                    ? `${((deviceStats.last24h || deviceStats.today).online / (deviceStats.last24h || deviceStats.today).total * 100).toFixed(0)}%`
                     : "-"}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {deviceStats?.today.online || 0} of {deviceStats?.today.total || 0} devices online
+                  {(deviceStats?.last24h || deviceStats?.today)?.online || 0} of {(deviceStats?.last24h || deviceStats?.today)?.total || 0} devices seen in 24h online
                 </p>
               </CardContent>
             </Card>

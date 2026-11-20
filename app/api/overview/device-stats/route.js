@@ -13,7 +13,7 @@ export async function GET() {
       const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
       const yesterdayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59);
 
-      const [todayStats, yesterdayStats] = await Promise.all([
+      const [todayStats, yesterdayStats, last24hStats] = await Promise.all([
         Device.aggregate([
           { $match: { createdAt: { $gte: todayStart, $lte: todayEnd } } },
           {
@@ -35,12 +35,27 @@ export async function GET() {
               offline: { $sum: { $cond: [{ $eq: ["$status", "offline"] }, 1, 0] } }
             }
           }
+        ]),
+        // Devices actually seen in the last 24h — a fairer "online rate"
+        // denominator than today's registration cohort, which is diluted by
+        // throwaway farm devices that register and die within minutes.
+        Device.aggregate([
+          { $match: { isActive: true, lastHeartbeat: { $gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) } } },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+              online: { $sum: { $cond: [{ $eq: ["$status", "online"] }, 1, 0] } },
+              offline: { $sum: { $cond: [{ $eq: ["$status", "offline"] }, 1, 0] } }
+            }
+          }
         ])
       ]);
 
       return {
         today: todayStats[0] || { total: 0, online: 0, offline: 0 },
-        yesterday: yesterdayStats[0] || { total: 0, online: 0, offline: 0 }
+        yesterday: yesterdayStats[0] || { total: 0, online: 0, offline: 0 },
+        last24h: last24hStats[0] || { total: 0, online: 0, offline: 0 }
       };
     }, CACHE_TTL.OVERVIEW_STATS);
 

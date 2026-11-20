@@ -78,6 +78,7 @@ The system runs these PM2 processes (configured in `ecosystem.config.cjs`):
 4. **worker:cleanup** - Message cleanup worker (`workers/cleanup-worker.js`)
 5. **worker:keepalive** - FCM keep-alive worker (`workers/keepalive-worker.js`)
 6. **worker:wakeup** - FCM reactive wake-up worker (`workers/wakeup-worker.js`)
+7. **worker:watchdog** - Queue-chain watchdog (`workers/watchdog-worker.js`, ported from sunmine 2026-11-20)
 
 **DISABLED: worker:suspend** - SMS quality monitor worker. Disabled by user decision (2026-08-19); commented out in `ecosystem.config.cjs` and `SMS_AUTO_SUSPEND_ENABLED=false` / `BULLMQ_SUSPEND_ENABLED=false` in `.env`. The worker also self-exits if started while `SMS_AUTO_SUSPEND_ENABLED=false`. Do not start it unless the user asks.
 
@@ -203,6 +204,18 @@ Reactive wake-up of OFFLINE devices. Runs as PM2 process `worker:wakeup`.
 **Manual wake-up API endpoints** (functional, send via `lib/fcm/send.js` directly, not via the queue):
 - `POST /api/device/:deviceId/wake-up` - Manually trigger wake-up for single device
 - `POST /api/device/wake-up-all` - Trigger wake-up for all offline devices
+
+### Queue-Chain Watchdog (BullMQ Worker: `workers/watchdog-worker.js`)
+
+Keeps every worker's job chain alive permanently. Runs as PM2 process `worker:watchdog` (one pass every 60s). Ported from the sunmine sister project on 2026-11-20.
+
+**Two failure modes it covers:**
+1. **DEAD CHAIN** - when a queue has delayed+waiting+active == 0 and workers are connected, seeds one scheduled job (guards against the status-chain death observed in the plan-cache incident)
+2. **HUNG JOB** - when an active job runs longer than its queue's threshold (5-15 min per queue), PM2-restarts that worker to kill the hung await; BullMQ stall recovery re-delivers the job
+
+Also PM2-restarts a worker when 0 consumers are connected to its queue. Restarts are rate-limited by a Redis-persisted cooldown (default 600s per app). The `pm2` binary is resolved from the nvm bin dir next to `process.execPath` (daemon children don't inherit the nvm PATH).
+
+**Configuration via env vars:** `WATCHDOG_ENABLED`, `WATCHDOG_INTERVAL_SECONDS` (default 60), `WATCHDOG_RESTART_COOLDOWN_SECONDS` (default 600), `WATCHDOG_DRY_RUN`.
 
 **Device model fields:**
 - `fcmToken` - Firebase Cloud Messaging token for wake-up notifications
@@ -399,7 +412,13 @@ Optional:
 - `FCM_WAKE_UP_OFFLINE_THRESHOLD` - Offline seconds before wake-up candidacy (default: 60)
 - `FCM_WAKE_UP_COOLDOWN` - Minutes between wake attempts per device, DB-persisted via `lastWakeupAttempt` (default: 5; 0 = every cycle — firehose, do not use)
 - `FCM_WAKE_UP_MAX_OFFLINE_HOURS` - Skip devices offline longer than this (default: 48; 0 = no cap)
-- `FCM_WAKE_UP_MAX_DEVICES` - Per-cycle hard cap, newest-offline first (default: 2000; currently 500 via `.env`)
+- `FCM_WAKE_UP_MAX_DEVICES` - Per-cycle hard cap, newest-offline first (default: 2000; currently 2000 — raised from 500 on 2026-11-20 so the ~15.5k offline-with-FCM fleet rotates in ~16 min instead of ~62 min)
+- `WATCHDOG_ENABLED` - Enable queue-chain watchdog (default: false)
+- `WATCHDOG_INTERVAL_SECONDS` - Watchdog pass interval (default: 60)
+- `WATCHDOG_RESTART_COOLDOWN_SECONDS` - Min seconds between PM2 restarts of the same app (default: 600)
+- `WATCHDOG_DRY_RUN` - Log watchdog actions without executing (default: false)
+
+**Important env precedence gotcha:** for keys set in an `ecosystem.config.cjs` `env:` block (e.g. `FCM_WAKE_UP_COOLDOWN=30`, `FCM_WAKE_UP_MAX_DEVICES`), the ecosystem value wins over `.env` — dotenv does not override pre-set process env vars. Keep both in sync.
 - `BULLMQ_WAKEUP_JOB_TIMEOUT_MS` - Hard cap on job execution (default: 600000)
 
 **SMS Auto-Suspend (script/suspend-low-sms.mjs):**
