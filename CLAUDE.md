@@ -410,15 +410,16 @@ Optional:
 **FCM Wake-Up (workers/wakeup-worker.js):**
 - `FCM_SERVICE_ACCOUNT_KEY` - Path to Firebase service account key JSON file (required for wake-up)
 - `FCM_WAKE_UP_OFFLINE_THRESHOLD` - Offline seconds before wake-up candidacy (default: 60)
-- `FCM_WAKE_UP_COOLDOWN` - Minutes between wake attempts per device, DB-persisted via `lastWakeupAttempt` (default: 5; 0 = every cycle — firehose, do not use)
-- `FCM_WAKE_UP_MAX_OFFLINE_HOURS` - Skip devices offline longer than this (default: 48; 0 = no cap)
+- `FCM_WAKE_UP_COOLDOWN` - Minutes between wake attempts per device, DB-persisted via `lastWakeupAttempt` (default: 5; currently 5 — lowered from 30 on 2026-11-21 for sunmine parity; sunmine's hotter wake-up loop is the main driver of their 28.6% vs our ~24% online ratio; 0 = every cycle — firehose, do not use)
+- `FCM_WAKE_UP_MAX_OFFLINE_HOURS` - Skip devices offline longer than this (default: 48; currently **0 = no cap**, full sunmine parity, set 2026-11-21 — was 48 before; ping every offline device with a token, including the 7–30d tail)
 - `FCM_WAKE_UP_MAX_DEVICES` - Per-cycle hard cap, newest-offline first (default: 2000; currently 2000 — raised from 500 on 2026-11-20 so the ~15.5k offline-with-FCM fleet rotates in ~16 min instead of ~62 min)
+- `FCM_WAKE_UP_SEND_CONCURRENCY` - FCM sends in flight per wake-up cycle (default: 10, added 2026-11-21). Serial sends at ~100ms/round-trip made a 2000-device cycle take 3+ min, longer than the 120s schedule — this keeps a full cycle under ~30s.
 - `WATCHDOG_ENABLED` - Enable queue-chain watchdog (default: false)
 - `WATCHDOG_INTERVAL_SECONDS` - Watchdog pass interval (default: 60)
 - `WATCHDOG_RESTART_COOLDOWN_SECONDS` - Min seconds between PM2 restarts of the same app (default: 600)
 - `WATCHDOG_DRY_RUN` - Log watchdog actions without executing (default: false)
 
-**Important env precedence gotcha:** for keys set in an `ecosystem.config.cjs` `env:` block (e.g. `FCM_WAKE_UP_COOLDOWN=30`, `FCM_WAKE_UP_MAX_DEVICES`), the ecosystem value wins over `.env` — dotenv does not override pre-set process env vars. Keep both in sync.
+**Important env precedence gotcha:** for keys set in an `ecosystem.config.cjs` `env:` block (e.g. `FCM_WAKE_UP_MAX_OFFLINE_HOURS=168`, `FCM_WAKE_UP_MAX_DEVICES`), the ecosystem value wins over `.env` — dotenv does not override pre-set process env vars. Keep both in sync.
 - `BULLMQ_WAKEUP_JOB_TIMEOUT_MS` - Hard cap on job execution (default: 600000)
 
 **SMS Auto-Suspend (script/suspend-low-sms.mjs):**

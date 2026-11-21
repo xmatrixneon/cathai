@@ -67,9 +67,12 @@ export async function handleWakeupJob(data) {
     const maxDevices = parseInt(process.env.FCM_WAKE_UP_MAX_DEVICES || '2000', 10);
     const devicesToWake = maxDevices > 0 ? eligible.slice(0, maxDevices) : eligible;
 
+    const sendConcurrency = Math.max(1, parseInt(process.env.FCM_WAKE_UP_SEND_CONCURRENCY || '10', 10));
+
     console.log(
       `[Wakeup] Starting: ${devicesToWake.length} devices to wake (offline threshold: ${offlineThreshold/1000}s` +
       `${maxOfflineHours > 0 ? `, <${maxOfflineHours}h` : ''}, cooldown: ${cooldownMinutes}m` +
+      `, send concurrency: ${sendConcurrency}` +
       `${devicesToWake.length < eligible.length ? `, capped from ${eligible.length}` : ''})`
     );
 
@@ -90,17 +93,30 @@ export async function handleWakeupJob(data) {
       };
     }
 
-    // Process devices serially, but buffer the DB writes: one bulkWrite at
-    // the end instead of an updateOne round-trip per device (roughly halves
-    // cycle time at fleet scale).
+    // Send with bounded concurrency: FCM round-trips run ~100ms on this box,
+    // so a serial loop made a 2000-device cycle take 3+ min — longer than
+    // the 120s schedule, throttling rotation. Chunks of sendConcurrency
+    // overlapping sends keep a full cycle under ~30s. DB writes stay
+    // buffered: one bulkWrite at the end instead of an updateOne round-trip
+    // per device.
     const bulkOps = [];
-    for (const device of devicesToWake) {
-      processed++;
+    for (let i = 0; i < devicesToWake.length; i += sendConcurrency) {
+      const chunk = devicesToWake.slice(i, i + sendConcurrency);
+      // sendWakeUpNotification catches its own FCM errors and returns a
+      // result object; the .catch covers non-FCM throws (e.g. Firebase not
+      // initialized) the same way the old serial try/catch did.
+      const results = await Promise.all(
+        chunk.map((device) =>
+          sendWakeUpNotification(device.deviceId, device.fcmToken)
+            .then((result) => ({ device, result }))
+            .catch(() => ({ device, result: null }))
+        )
+      );
 
-      try {
-        const result = await sendWakeUpNotification(device.deviceId, device.fcmToken);
+      for (const { device, result } of results) {
+        processed++;
 
-        if (result.success) {
+        if (result?.success) {
           notificationsSent++;
           bulkOps.push({
             updateOne: {
@@ -108,7 +124,7 @@ export async function handleWakeupJob(data) {
               update: { $set: { lastWakeupAttempt: new Date() } },
             },
           });
-        } else if (result.isStaleToken) {
+        } else if (result?.isStaleToken) {
           errors++;
           staleTokensRemoved++;
           // Remove stale FCM token so device isn't retried in future cycles
@@ -121,8 +137,6 @@ export async function handleWakeupJob(data) {
         } else {
           errors++;
         }
-      } catch (err) {
-        errors++;
       }
     }
 

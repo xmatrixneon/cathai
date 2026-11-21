@@ -106,18 +106,27 @@ module.exports = {
         // the background and double-ping devices.
         BULLMQ_CONCURRENCY_DEVICE_WAKEUP: '1',
         FCM_WAKE_UP_OFFLINE_THRESHOLD: '60',
-        // 0 = firehose (re-ping ALL ~22k offline devices every 2-min cycle, ~7k
-        // pings/min — burned Android's high-priority FCM budget and the job
-        // never finished). 30 = each offline device pinged at most every 30
-        // min; freshly-dropped devices still wake next cycle (their
-        // lastWakeupAttempt is stale).
-        FCM_WAKE_UP_COOLDOWN: '30',
-        // 2000/cycle rotates the full ~15.5k offline-with-FCM fleet in ~8
-        // cycles (~16 min) instead of ~31 (~62 min at the old 500 cap).
-        // Cooldown above still caps per-device pings at one per 30 min.
+        // 0 = firehose (re-ping ALL offline devices every cycle, no per-device
+        // throttle — burned Android's high-priority FCM budget and the job
+        // never finished). 5 = sunmine parity (2026-11-21): their fleet runs
+        // 28.6% online vs our 23.7% largely on this knob + the age cap below;
+        // per-device pings are still bounded by MAX_DEVICES × cycles/hour.
+        FCM_WAKE_UP_COOLDOWN: '5',
+        // 0 = no age cap, exact sunmine parity (2026-11-21, user decision):
+        // ping every offline device with a token, including the 7–30d tail.
+        // Sunmine runs no cap at 28.6% online vs our 23.7%; the 48h cap
+        // (previous value) left ~3.1k devices permanently unpinged.
+        FCM_WAKE_UP_MAX_OFFLINE_HOURS: '0',
+        // 2000/cycle rotates the full offline-with-FCM fleet in a handful of
+        // cycles instead of ~31 (~62 min at the old 500 cap). Cooldown above
+        // still caps per-device pings.
         // NOTE: values here WIN over .env (dotenv does not override
         // pre-set process env) — keep .env in sync cosmetically only.
         FCM_WAKE_UP_MAX_DEVICES: '2000',
+        // FCM round-trips run ~100ms on this box, so a serial send loop made
+        // a 2000-device cycle take 3+ min (> the 120s schedule, throttling
+        // rotation). 10 in flight keeps a full cycle under ~30s.
+        FCM_WAKE_UP_SEND_CONCURRENCY: '10',
       },
       // Optimized memory for 62GB RAM system
       node_args: '--max-old-space-size=1024', // 1GB heap, PM2 restarts at 900MB
