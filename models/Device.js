@@ -115,10 +115,6 @@ const deviceSchema = new mongoose.Schema({
   fcmTokenUpdatedAt: { type: Date, default: null },
   // Track last wake-up attempt for cooldown
   lastWakeupAttempt: { type: Date, default: null },
-  // RTDB presence channel (prototype, lib/firebase/rtdb.js): online flag is
-  // flipped by Firebase itself when the device's RTDB socket dies
-  presenceOnline: { type: Boolean, default: null },
-  presenceLastSeen: { type: Date, default: null },
 }, {
   timestamps: true,
 });
