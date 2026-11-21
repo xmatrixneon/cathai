@@ -282,7 +282,7 @@ Runs as PM2 process `worker:fetch`:
 - Extracts OTP using service-specific regex patterns
 - Updates order status when OTP is found
 - Handles multi-use orders (services requiring multiple SMS)
-- Auto-expires orders after 15 minutes
+- Auto-expires orders after 20 minutes
 - Creates number locks when first OTP is received
 - Updates number quality scores based on success/failure
 
@@ -299,7 +299,7 @@ Runs as PM2 process `worker:fetch`:
 - Consecutive failures tracked for auto-suspension
 
 **Order Expiration Behavior (Important):**
-- All orders expire after 15 minutes (`active: false`)
+- All orders expire after 20 minutes (`active: false`)
 - Orders with `isused: true` (received OTP) **preserve their success state** during expiration
 - Successful orders keep `failureReason: 'none'` and `qualityImpact: 5` even after expiring
 - This ensures accurate number quality tracking and prevents successful orders from being marked as failures
@@ -489,7 +489,7 @@ Optional:
 
 13. **Redis Dependency**: Redis is required for BullMQ operation. Ensure Redis is running before starting workers. Connection string is configured via `REDIS_URI` (default: `redis://localhost:6379`).
 
-14. **Order Expiration and Success State Preservation**: All orders expire after 15 minutes regardless of success. However, orders that have successfully received an OTP (`isused: true`) must preserve their success state (`failureReason: 'none'`, `qualityImpact: 5`) during expiration. This is critical for accurate number quality tracking. The expiration logic in `jobs/handlers/fetch-handler.js` checks `order.isused` before applying expiration values.
+14. **Order Expiration and Success State Preservation**: All orders expire after 20 minutes regardless of success. However, orders that have successfully received an OTP (`isused: true`) must preserve their success state (`failureReason: 'none'`, `qualityImpact: 5`) during expiration. This is critical for accurate number quality tracking. The expiration logic in `jobs/handlers/fetch-handler.js` checks `order.isused` before applying expiration values.
 
 ## PHP Stubs API (`/var/www/html/stubs/`)
 
