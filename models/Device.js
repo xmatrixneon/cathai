@@ -113,6 +113,9 @@ const deviceSchema = new mongoose.Schema({
   // Firebase Cloud Messaging token for remote wake-up
   fcmToken: { type: String, default: null },
   fcmTokenUpdatedAt: { type: Date, default: null },
+  // Last FCM token fetch failure reason reported by the app (>= 1.3),
+  // e.g. "AUTHENTICATION_FAILED (GMS:0)" or "SERVICE_NOT_AVAILABLE (GMS:1)"
+  fcmError: { type: String, default: null },
   // Track last wake-up attempt for cooldown
   lastWakeupAttempt: { type: Date, default: null },
 }, {
