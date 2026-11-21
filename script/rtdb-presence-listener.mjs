@@ -52,6 +52,9 @@ const state = new Map(); // deviceId -> {online, wsConnected, lastSeen}
 function upsert(deviceId, val) {
   const prev = state.get(deviceId);
   state.set(deviceId, { ...prev, ...val });
+  if (!prev) {
+    console.log(`[new] ${deviceId} first seen (online=${val.online}, ws=${val.wsConnected}, v=${val.appVersion || '?'})`);
+  }
   if (prev && prev.online !== val.online) {
     console.log(
       `[transition] ${deviceId} ${val.online ? '🟢 ONLINE' : '🔴 offline'}` +
