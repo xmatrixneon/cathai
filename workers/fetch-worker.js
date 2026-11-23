@@ -57,7 +57,7 @@ const worker = new Worker('sms-fetch', async (job) => {
           runId: crypto.randomUUID(),
           startedAt: Date.now(),
         },
-        { delay }
+        { delay, deduplication: { id: 'sms-fetch-chain', keepLastIfActive: true } }
       );
     }
 

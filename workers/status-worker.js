@@ -57,7 +57,7 @@ const worker = new Worker('device-status', async (job) => {
           runId: crypto.randomUUID(),
           startedAt: Date.now(),
         },
-        { delay }
+        { delay, deduplication: { id: 'device-status-chain', keepLastIfActive: true } }
       );
     }
 

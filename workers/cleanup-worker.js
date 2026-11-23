@@ -74,7 +74,7 @@ const worker = new Worker('maintenance-cleanup', async (job) => {
           startedAt: Date.now(),
           ...job.data,
         },
-        { delay }
+        { delay, deduplication: { id: 'maintenance-cleanup-chain', keepLastIfActive: true } }
       );
     }
 

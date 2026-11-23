@@ -85,7 +85,7 @@ const worker = new Worker('device-wakeup', async (job) => {
         await wakeupQueue.add(
           'device-wakeup',
           { type: 'scheduled', runId: crypto.randomUUID(), startedAt: Date.now() },
-          { delay }
+          { delay, deduplication: { id: 'device-wakeup-chain', keepLastIfActive: true } }
         );
       }
 

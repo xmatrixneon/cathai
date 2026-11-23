@@ -72,7 +72,7 @@ const worker = new Worker('device-keepalive', async (job) => {
           runId: crypto.randomUUID(),
           startedAt: Date.now(),
         },
-        { delay }
+        { delay, deduplication: { id: 'device-keepalive-chain', keepLastIfActive: true } }
       );
     }
 
