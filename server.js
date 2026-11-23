@@ -66,7 +66,11 @@ app.prepare().then(() => {
     const clientIp = request.socket.remoteAddress;
     const { query } = parse(request.url, true);
 
-    console.log(`📱 New WebSocket connection: ${connectionId} from ${clientIp}`);
+    // Connection open/close are extremely high-frequency (~1,200/min fleet-wide)
+    // and dominated log volume. Enable with LOG_WS_VERBOSE=1 when debugging.
+    if (process.env.LOG_WS_VERBOSE === '1') {
+      console.log(`📱 New WebSocket connection: ${connectionId} from ${clientIp}`);
+    }
 
     ws.connectionId = connectionId;
     ws.isAlive = true;
@@ -80,7 +84,7 @@ app.prepare().then(() => {
       ws.isDashboard = true;
       wsManager.addDashboardClient(ws);
 
-      ws.on('pong', () => { ws.isAlive = true; });
+      ws.on('pong', () => { ws.isAlive = true; ws.missedPongs = 0; });
       ws.on('close', () => {
         console.log(`📊 Dashboard client disconnected: ${connectionId}`);
         wsManager.removeDashboardClient(ws);
@@ -113,9 +117,11 @@ app.prepare().then(() => {
       }
     });
 
-    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('pong', () => { ws.isAlive = true; ws.missedPongs = 0; });
     ws.on('close', () => {
-      console.log(`🔌 Connection closed: ${connectionId}`);
+      if (process.env.LOG_WS_VERBOSE === '1') {
+        console.log(`🔌 Connection closed: ${connectionId}`);
+      }
       wsManager.handleDisconnect(ws);
     });
     ws.on('error', (error) => {
@@ -123,16 +129,24 @@ app.prepare().then(() => {
     });
   });
 
+  // Ping/pong keepalive. A connection is terminated only after TWO missed
+  // pongs (~90s of silence) — mobile networks regularly stall >30s, and
+  // terminating on a single miss caused heavy reconnect churn.
   const heartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (!ws.isAlive) {
-        console.log(`💀 Terminating dead connection: ${ws.connectionId}`);
-        if (ws.isDashboard) {
-          wsManager.removeDashboardClient(ws);
-        } else {
-          wsManager.handleDisconnect(ws);
+        ws.missedPongs = (ws.missedPongs || 0) + 1;
+        if (ws.missedPongs >= 2) {
+          console.log(`💀 Terminating dead connection: ${ws.connectionId} (${ws.missedPongs} missed pongs)`);
+          if (ws.isDashboard) {
+            wsManager.removeDashboardClient(ws);
+          } else {
+            wsManager.handleDisconnect(ws);
+          }
+          return ws.terminate();
         }
-        return ws.terminate();
+        // Still within grace period — probe again
+        return ws.ping();
       }
       ws.isAlive = false;
       ws.ping();

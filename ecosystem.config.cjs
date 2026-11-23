@@ -49,7 +49,7 @@ module.exports = {
     {
       name: 'worker:fetch',
       script: 'workers/fetch-worker.js',
-      instances: 2, // 2 instances for high traffic
+      instances: 1, // single instance — jobs self-schedule, so 2 instances ran duplicate poll chains (double DB load); throughput comes from BULLMQ_CONCURRENCY_SMS_FETCH
       max_memory_restart: '1800M', // PM2 auto-restart if memory exceeds 1800MB (10% below heap limit)
       env: {
         BULLMQ_FETCH_ENABLED: 'true',
@@ -64,7 +64,7 @@ module.exports = {
     {
       name: 'worker:status',
       script: 'workers/status-worker.js',
-      instances: 2, // 2 instances for better load distribution
+      instances: 1, // single instance — one self-scheduling chain; 2 instances raced the startup seed and could double-seed a second sync chain (double DB load on the plan-cache-sensitive numbers sync)
       max_memory_restart: '5500M', // PM2 auto-restart if memory exceeds 5500MB (10% below heap limit)
       env: {
         BULLMQ_STATUS_ENABLED: 'true',
