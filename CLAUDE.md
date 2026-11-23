@@ -27,13 +27,8 @@ PHP-based SMS activation API that provides external interface for requesting pho
 - Number allocation with smart cooldown (5-20 minutes randomized)
 - OTP extraction using service-specific regex patterns
 
-### 3. Mobile App
-React Native (Expo) application that connects to the manager via WebSocket and REST API. Has its own authentication system separate from the web admin panel.
-
-**Key components:**
-- Uses `/api/mobile/login` for authentication (separate from web `/api/login`)
-- Scopes-based permission system for device access control
-- Can trigger device wake-up via FCM notifications
+### 3. Mobile App Authentication (REMOVED)
+Mobile-user functionality (`/api/mobile/*` routes, `MobileUser` model, `script/create-mobile-user.mjs`) was removed on 2026-11-23 by user decision. `lib/verify.js` rejects any surviving `clientType: 'mobile'` tokens with 403. Only web admin panel auth (`/api/login`, `/api/register`, `User` model) remains. Do not re-add it.
 
 ## Development Commands
 
@@ -63,9 +58,6 @@ node script/test-status-worker.mjs    # Test status worker
 node script/test-fetch-worker.mjs     # Test fetch worker
 node script/test-suspend-worker.mjs   # Test suspend worker
 node script/test-cleanup-worker.mjs   # Test cleanup worker
-
-# Create Mobile App User
-node script/create-mobile-user.mjs <email> <password> <name>
 ```
 
 ## PM2 Apps
@@ -363,15 +355,6 @@ DELETE - Soft delete (set `active: false`)
 - **Snapshot**: `numberSnapshot` captures number state at order time
 - **Important**: `serviceid` is the `_id` (ObjectId) of the service document, not the `code` string. Use `db.services.findOne({_id: ObjectId(order.serviceid)})` for lookups.
 
-**MobileUser** (`models/MobileUser.js`):
-- `email` (unique) - Login email for mobile app
-- `password` - Hashed password (bcrypt)
-- `name` - Display name
-- `allowedDevices[]` - Restrict access to specific device IDs (empty = all devices)
-- `scopes[]` - Permission scopes: 'devices:read', 'messages:read', 'sms:send', 'call:manage', 'ws:connect'
-- `isActive` - Account active flag
-- `lastLoginAt` - Last successful login timestamp
-
 ### API Routes Structure
 
 - `/api/device/*` - Device CRUD, list, stats, send SMS, call forwarding, wake-up
@@ -380,7 +363,6 @@ DELETE - Soft delete (set `active: false`)
 - `/api/overview/*` - Dashboard statistics, activations, charts
 - `/api/countries/*`, `/api/services/*` - Reference data
 - `/api/locks/*` - Number lock/unlock management
-- `/api/mobile/*` - Mobile app authentication (separate from web admin panel)
 - `/api/login`, `/api/register` - Web admin panel authentication
 - `/api/queues/stats` - BullMQ queue statistics monitoring
 - `/api/queues/dlq` - Dead Letter Queue management (view, retry, delete failed jobs)
@@ -398,7 +380,6 @@ Optional:
 - `DEVICE_AUTO_DELETE_ENABLED` - Enable auto-delete (default: true)
 - `DEVICE_AUTO_DELETE_HOURS` - Offline hours before deletion (default: 720 = 30 days)
 - `DEVICE_AUTO_DELETE_MAX_PER_RUN` - Max devices deleted per status-worker run (default: 1000)
-- `MOBILE_API_KEY` - API key for mobile app (optional but recommended)
 
 **BullMQ Worker Enable/Disable:**
 - `BULLMQ_STATUS_ENABLED` - Enable status worker (default: false)
@@ -471,10 +452,7 @@ Optional:
 
 8. **SMS-Based Auto-Suspend**: Numbers receiving 0 SMS in the time window are auto-suspended with `suspensionReason: 'low_sms'`. Auto-recovers when SMS count rises above threshold.
 
-9. **Dual Authentication Systems**: The system has two separate authentication systems:
-   - Web admin panel: Uses `/api/login` and `/api/register` with `User` model
-   - Mobile app: Uses `/api/mobile/login` with `MobileUser` model and scopes-based permissions
-   - Mobile users created with `script/create-mobile-user.mjs` cannot log in to web panel
+9. **Single Authentication System**: Only web admin panel auth exists (`/api/login` and `/api/register` with `User` model, verified by `lib/verify.js`). The former mobile-app auth (`/api/mobile/*`, `MobileUser` model, scopes) was removed 2026-11-23; legacy mobile tokens are rejected with 403.
 
 10. **BullMQ Job Queue System**: The system uses BullMQ with Redis for background job processing:
    - All workers connect to Redis via `lib/queues/redis.js` singleton
