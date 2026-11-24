@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Shield, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Phone, TrendingUp, TrendingDown } from 'lucide-react';
+import { getCookie } from '@/utils/cookie';
 import {
   Card,
   CardContent,
@@ -70,7 +71,9 @@ export default function QualityDashboard() {
   const fetchNumbers = async () => {
     try {
       setRefreshing(true);
-      const response = await fetch(`/api/numbers/quality?filter=${filter}&page=${page}&limit=50`);
+      const response = await fetch(`/api/numbers/quality?filter=${filter}&page=${page}&limit=50`, {
+        headers: { Authorization: `Bearer ${getCookie('token')}` },
+      });
       const data: QualityResponse = await response.json();
 
       if (data.success && data.data) {
@@ -119,7 +122,7 @@ export default function QualityDashboard() {
     try {
       const response = await fetch('/api/numbers/quality', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getCookie('token')}` },
         body: JSON.stringify({
           action,
           numbers: Array.from(selectedNumbers),

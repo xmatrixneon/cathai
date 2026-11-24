@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Activity, RefreshCw, Shield, Signal, Phone, CheckCircle2, XCircle, AlertTriangle, Search } from 'lucide-react';
+import { getCookie } from '@/utils/cookie';
 import {
   Card,
   CardContent,
@@ -90,7 +91,9 @@ export default function NumberManagement() {
     try {
       setRefreshing(true);
       const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
-      const response = await fetch(`/api/numbers/quality?filter=${filter}&page=${page}&limit=50${searchParam}`);
+      const response = await fetch(`/api/numbers/quality?filter=${filter}&page=${page}&limit=50${searchParam}`, {
+        headers: { Authorization: `Bearer ${getCookie('token')}` },
+      });
       const data: QualityResponse = await response.json();
 
       if (data.success && data.data) {
@@ -151,7 +154,7 @@ export default function NumberManagement() {
     try {
       const response = await fetch('/api/numbers/quality', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getCookie('token')}` },
         body: JSON.stringify({
           action,
           numbers: Array.from(selectedNumbers),

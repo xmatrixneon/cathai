@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { getCookie } from '@/utils/cookie'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -129,7 +130,9 @@ export function DeviceList() {
         ...(statusFilter !== 'all' && { status: statusFilter }),
         ...(searchTerm && { search: searchTerm }),
       })
-      const res    = await fetch(`/api/device/list?${params}`)
+      const res    = await fetch(`/api/device/list?${params}`, {
+        headers: { Authorization: `Bearer ${getCookie('token')}` },
+      })
       const result = await res.json()
       if (result.success) {
         setDevices(result.data.devices)
@@ -332,7 +335,7 @@ export function DeviceList() {
     try {
       const res    = await fetch(`/api/device/${deviceId}/call-forwarding`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getCookie('token')}` },
         body: JSON.stringify({ action, simSlot, ...(action === 'forward' && { phoneNumber }) }),
       })
       const result = await res.json()
@@ -396,7 +399,7 @@ export function DeviceList() {
     try {
       const res = await fetch(`/api/device/${smsDialog.deviceId}/send-sms`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getCookie('token')}` },
         body: JSON.stringify({
           phoneNumber: '+91 ' + smsPhoneNumber.trim(),
           message: smsMessage.trim(),
@@ -420,7 +423,10 @@ export function DeviceList() {
   const confirmDelete = async () => {
     if (!selectedDevice) return
     try {
-      const res    = await fetch(`/api/device/${selectedDevice.deviceId}`, { method: 'DELETE' })
+      const res    = await fetch(`/api/device/${selectedDevice.deviceId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getCookie('token')}` },
+      })
       const result = await res.json()
       if (result.success) {
         toast.success('Device deleted')
@@ -440,6 +446,7 @@ export function DeviceList() {
     try {
       const res = await fetch(`/api/device/${deviceId}/wake-up`, {
         method: 'POST',
+        headers: { Authorization: `Bearer ${getCookie('token')}` },
       })
       const result = await res.json()
       if (result.success) {
@@ -461,6 +468,7 @@ export function DeviceList() {
     try {
       const res = await fetch('/api/device/wake-up-all', {
         method: 'POST',
+        headers: { Authorization: `Bearer ${getCookie('token')}` },
       })
       const result = await res.json()
       if (result.success) {
